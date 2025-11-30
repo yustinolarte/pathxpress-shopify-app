@@ -300,11 +300,66 @@ const shopsTokens = {}; // { "tienda.myshopify.com": "ACCESS_TOKEN" }
 
 
 // ======================
-// 1) WEBHOOK (PRIMERO, ANTES DE express.json())
+// HELPER: Verify Shopify Webhook HMAC
 // ======================
+function verifyShopifyWebhook(req, res, next) {
+    const hmac = req.headers["x-shopify-hmac-sha256"];
+    const shop = req.headers["x-shopify-shop-domain"];
+
+    if (!hmac || !shop) {
+        console.warn("⚠️ Webhook missing HMAC or Shop header");
+        return res.status(401).send("Unauthorized");
+    }
+
+    try {
+        // req.body must be a Buffer (raw) at this point
+        const generatedHash = crypto
+            .createHmac("sha256", process.env.SHOPIFY_API_SECRET)
+            .update(req.body)
+            .digest("base64");
+
+        if (generatedHash !== hmac) {
+            console.error(`⛔ Invalid HMAC for shop ${shop}`);
+            return res.status(401).send("Unauthorized: Invalid HMAC");
+        }
+
+        next();
+    } catch (e) {
+        console.error("⛔ Error verifying HMAC:", e);
+        return res.status(500).send("Server Error");
+    }
+}
+
+// ======================
+// 1) WEBHOOKS (First, before express.json())
+// ======================
+
+// Middleware chain for webhooks: Raw Body -> HMAC Verification
+const webhookMiddleware = [
+    express.raw({ type: "application/json" }),
+    verifyShopifyWebhook
+];
+
+// --- GDPR / Mandatory Webhooks ---
+app.post("/webhooks/shopify/customers/data_request", webhookMiddleware, (req, res) => {
+    console.log("🔒 GDPR: Customer Data Request received");
+    res.sendStatus(200);
+});
+
+app.post("/webhooks/shopify/customers/redact", webhookMiddleware, (req, res) => {
+    console.log("🔒 GDPR: Customer Redact received");
+    res.sendStatus(200);
+});
+
+app.post("/webhooks/shopify/shop/redact", webhookMiddleware, (req, res) => {
+    console.log("🔒 GDPR: Shop Redact received");
+    res.sendStatus(200);
+});
+
+// --- Order Webhook ---
 app.post(
     "/webhooks/shopify/orders",
-    express.raw({ type: "application/json" }),
+    webhookMiddleware,
     async (req, res) => {
         const shop = req.headers["x-shopify-shop-domain"];
 
