@@ -1276,7 +1276,11 @@ async function registerMandatoryWebhooks(shop, accessToken) {
         });
 
         const text = await res.text();
-        console.log(`🔔 Registro webhook ${topic}:`, res.status, text);
+        if (res.status === 422 && text.includes("taken")) {
+            console.log(`🔔 Webhook ${topic} already registered.`);
+        } else {
+            console.log(`🔔 Registro webhook ${topic}:`, res.status, text);
+        }
     }
 
     try {
@@ -1326,7 +1330,11 @@ async function registerOrderWebhook(shop, accessToken) {
     );
 
     const body = await response.text();
-    console.log("🔔 Webhook Registration:", response.status, body);
+    if (response.status === 422 && body.includes("taken")) {
+        console.log("🔔 Order Webhook already registered.");
+    } else {
+        console.log("🔔 Webhook Registration:", response.status, body);
+    }
 }
 
 // ======================
