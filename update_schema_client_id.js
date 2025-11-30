@@ -17,12 +17,12 @@ async function updateTable() {
             ALTER TABLE shopify_shops
             ADD COLUMN pathxpress_client_id INT DEFAULT NULL
         `);
-        console.log("✅ Columna pathxpress_client_id añadida a shopify_shops.");
+        console.log("✅ Column pathxpress_client_id added to shopify_shops.");
     } catch (err) {
         if (err.code === 'ER_DUP_FIELDNAME') {
-            console.log("ℹ️ La columna pathxpress_client_id ya existe.");
+            console.log("ℹ️ Column pathxpress_client_id already exists.");
         } else {
-            console.error("❌ Error alterando tabla:", err);
+            console.error("❌ Error altering table:", err);
         }
     } finally {
         await db.end();

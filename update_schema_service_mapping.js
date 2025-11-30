@@ -17,12 +17,12 @@ async function updateTable() {
             ALTER TABLE shopify_shops
             ADD COLUMN service_mapping JSON NULL
         `);
-        console.log("✅ Columna service_mapping (JSON) añadida a shopify_shops.");
+        console.log("✅ Column service_mapping (JSON) added to shopify_shops.");
     } catch (err) {
         if (err.code === 'ER_DUP_FIELDNAME') {
-            console.log("ℹ️ La columna service_mapping ya existe.");
+            console.log("ℹ️ Column service_mapping already exists.");
         } else {
-            console.error("❌ Error alterando tabla:", err);
+            console.error("❌ Error altering table:", err);
         }
     } finally {
         await db.end();

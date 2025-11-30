@@ -58,9 +58,9 @@ async function saveShipmentToMySQL(shipment) {
             ]
         );
 
-        console.log("🗄️ Shipment guardado en MySQL, id:", result.insertId);
+        console.log("🗄️ Shipment saved to MySQL, id:", result.insertId);
     } catch (err) {
-        console.error("⛔ Error guardando shipment en MySQL:", err);
+        console.error("⛔ Error saving shipment to MySQL:", err);
     }
 }
 // ======================
@@ -90,7 +90,7 @@ async function saveShipmentToOrdersTable(shipment) {
         const sequenceStr = nextSequence.toString().padStart(5, '0');
         const newWaybillNumber = `PX2025${sequenceStr}`;
 
-        console.log("🔢 Generado Waybill:", newWaybillNumber);
+        console.log("🔢 Generated Waybill:", newWaybillNumber);
 
         const [result] = await db.execute(
             `INSERT INTO orders (
@@ -201,7 +201,7 @@ async function saveShipmentToOrdersTable(shipment) {
         );
 
         const insertedOrderId = result.insertId;
-        console.log("📥 Shipment insertado en tabla `orders`, id:", insertedOrderId);
+        console.log("📥 Shipment inserted into `orders` table, id:", insertedOrderId);
 
         // 2. Si tiene COD, crear registro en codRecords
         if (shipment.codRequired && shipment.codAmount > 0) {
@@ -224,13 +224,13 @@ async function saveShipmentToOrdersTable(shipment) {
                         new Date()
                     ]
                 );
-                console.log("💰 Registro COD creado para orden:", insertedOrderId);
+                console.log("💰 COD record created for order:", insertedOrderId);
             } catch (codErr) {
-                console.error("⛔ Error creando registro COD:", codErr);
+                console.error("⛔ Error creating COD record:", codErr);
             }
         }
     } catch (err) {
-        console.error("⛔ Error guardando en tabla `orders`:", err);
+        console.error("⛔ Error saving to `orders` table:", err);
     }
 }
 
@@ -270,9 +270,9 @@ async function saveShopToDB(shopDomain, accessToken, shopData) {
             shopData.country,
             shopData.zip
         ]);
-        console.log(`💾 Tienda ${shopDomain} guardada/actualizada en DB.`);
+        console.log(`💾 Shop ${shopDomain} saved/updated in DB.`);
     } catch (err) {
-        console.error("⛔ Error guardando tienda en DB:", err);
+        console.error("⛔ Error saving shop to DB:", err);
     }
 }
 
@@ -287,7 +287,7 @@ async function getShopFromDB(shopDomain) {
         );
         return rows[0] || null;
     } catch (err) {
-        console.error("⛔ Error obteniendo tienda de DB:", err);
+        console.error("⛔ Error getting shop from DB:", err);
         return null;
     }
 }
@@ -312,7 +312,7 @@ app.post(
             const bodyString = req.body.toString("utf8");
             const order = JSON.parse(bodyString);
 
-            console.log("📦 Nueva ORDER desde Shopify:", order.name);
+            console.log("📦 New ORDER from Shopify:", order.name);
 
             // 1. Obtener info de la tienda de la DB para llenar el Shipper
             const shopData = await getShopFromDB(shop);
@@ -325,7 +325,7 @@ app.post(
             );
 
             if (existing.length > 0) {
-                console.log(`⚠️ Orden ${order.name} ya existe en DB. Ignorando duplicado.`);
+                console.log(`⚠️ Order ${order.name} already exists in DB. Ignoring duplicate.`);
                 return res.sendStatus(200);
             }
 
@@ -337,7 +337,7 @@ app.post(
 
                 // Caso A: AutoSync desactivado y NO tiene el tag requerido
                 if (!autoSync && requiredTag && !orderTags.includes(requiredTag)) {
-                    console.log(`🚫 Orden ${order.name} ignorada: AutoSync OFF y no tiene tag '${requiredTag}'`);
+                    console.log(`🚫 Order ${order.name} ignored: AutoSync OFF and missing tag '${requiredTag}'`);
                     return res.sendStatus(200);
                 }
 
@@ -352,7 +352,7 @@ app.post(
                 if (!autoSync) {
                     // Si no es auto, DEBE tener el tag
                     if (!requiredTag || !orderTags.includes(requiredTag)) {
-                        console.log(`🚫 Orden ${order.name} ignorada: Requiere tag '${requiredTag}'`);
+                        console.log(`🚫 Order ${order.name} ignored: Requires tag '${requiredTag}'`);
                         return res.sendStatus(200);
                     }
                 } else {
@@ -365,7 +365,7 @@ app.post(
 
             const shipment = orderToShipment(order, shop, shopData);
 
-            console.log("🚚 Shipment listo para guardar en MySQL:");
+            console.log("🚚 Shipment ready to save to MySQL:");
             console.dir(shipment, { depth: null });
 
             // 1) log / auditoría Shopify
@@ -375,7 +375,7 @@ app.post(
             await saveShipmentToOrdersTable(shipment);
 
         } catch (e) {
-            console.log("⚠️ Error procesando orden del webhook:", e);
+            console.log("⚠️ Error processing webhook order:", e);
 
             // GUARDAR EN COLA DE REINTENTOS
             try {
@@ -384,9 +384,9 @@ app.post(
                     INSERT INTO webhook_retries (shop_domain, payload, error_message)
                     VALUES (?, ?, ?)
                 `, [shop, bodyString, e.message]);
-                console.log("🛡️ Orden guardada en cola de reintentos.");
+                console.log("🛡️ Order saved to retry queue.");
             } catch (dbErr) {
-                console.error("⛔ Error CRÍTICO guardando en reintentos:", dbErr);
+                console.error("⛔ CRITICAL Error saving to retries:", dbErr);
             }
         }
 
@@ -406,7 +406,7 @@ app.use(express.json());
 // 3) RUTA SIMPLE
 // ======================
 app.get("/", (req, res) => {
-    res.send("PATHXPRESS Shopify App está corriendo ✅");
+    res.send("PATHXPRESS Shopify App is running ✅");
 });
 // ======================
 // 4) PANTALLA PRINCIPAL /app
@@ -416,7 +416,7 @@ app.get("/app", async (req, res) => {
         req.query.shop || req.headers["x-shopify-shop-domain"] || "";
 
     if (!shop) {
-        return res.status(400).send("No se pudo detectar la tienda (shop).");
+        return res.status(400).send("Could not detect the shop.");
     }
 
     const isConnected = Boolean(shopsTokens[shop]);
@@ -425,7 +425,7 @@ app.get("/app", async (req, res) => {
     let currentClientId = "";
     let currentAutoSync = true;
     let currentSyncTag = "";
-    let shipmentsRows = "<tr><td colspan='5'>No hay envíos recientes.</td></tr>";
+    let shipmentsRows = "<tr><td colspan='5'>No recent shipments.</td></tr>";
     let metrics = { todayCount: 0, activeCount: 0, pendingCod: 0 };
 
     if (isConnected) {
@@ -509,15 +509,15 @@ app.get("/app", async (req, res) => {
                         <td style="padding:10px; color:#666;">${new Date(row.createdAt).toLocaleDateString()}</td>
                         <td style="padding:10px;">
                             ${row.waybillNumber
-                            ? `<button onclick='generateWaybillPDF(${shipmentData})' style="background:none; border:none; cursor:pointer; color:#008060; font-weight:bold; text-decoration:underline;">🖨️ Imprimir Etiqueta</button>`
-                            : '<span style="color:#999;">Pendiente</span>'
+                            ? `<button onclick='generateWaybillPDF(${shipmentData})' style="background:none; border:none; cursor:pointer; color:#008060; font-weight:bold; text-decoration:underline;">🖨️ Print Label</button>`
+                            : '<span style="color:#999;">Pending</span>'
                         }
                         </td>
                     </tr>
                 `}).join("");
             }
         } catch (err) {
-            console.error("Error obteniendo envíos para dashboard:", err);
+            console.error("Error getting shipments for dashboard:", err);
         }
     }
 
@@ -659,8 +659,8 @@ app.get("/app", async (req, res) => {
       <body>
         <div class="card">
             <h1>PATHXPRESS Portal</h1>
-            <p>Tienda conectada: <b>${shop}</b></p>
-            ${isConnected ? '<span style="color:green; font-weight:bold;">● Conectado</span>' : '<span style="color:red; font-weight:bold;">● Desconectado</span>'}
+            <p>Connected shop: <b>${shop}</b></p>
+            ${isConnected ? '<span style="color:green; font-weight:bold;">● Connected</span>' : '<span style="color:red; font-weight:bold;">● Disconnected</span>'}
         </div>
 
         ${isConnected
@@ -668,45 +668,45 @@ app.get("/app", async (req, res) => {
               <div class="card">
                 <div style="display:flex; gap:20px;">
                     <div class="metric-card">
-                        <div class="metric-label">Envíos Hoy</div>
+                        <div class="metric-label">Shipments Today</div>
                         <div class="metric-val">${metrics.todayCount || 0}</div>
                     </div>
                     <div class="metric-card">
-                        <div class="metric-label">Envíos Activos</div>
+                        <div class="metric-label">Active Shipments</div>
                         <div class="metric-val">${metrics.activeCount || 0}</div>
                     </div>
                     <div class="metric-card">
-                        <div class="metric-label">COD Pendiente</div>
+                        <div class="metric-label">Pending COD</div>
                         <div class="metric-val">AED ${(metrics.pendingCod || 0).toLocaleString()}</div>
                     </div>
                 </div>
               </div>
 
               <div class="card">
-                <h2>⚙️ Configuración General</h2>
+                <h2>⚙️ General Settings</h2>
                 <form action="/app/save-settings" method="POST">
                     <input type="hidden" name="shop" value="${shop}" />
                     
                     <label for="clientId">PathXpress Client ID:</label>
                     <input type="number" id="clientId" name="clientId" placeholder="Ej: 123" required value="${currentClientId || ''}" />
 
-                    <h3 style="margin-top:20px; font-size:16px;">🔍 Filtros de Sincronización</h3>
+                    <h3 style="margin-top:20px; font-size:16px;">🔍 Sync Filters</h3>
                     <div style="margin-bottom:15px; padding:10px; background:#f4f6f8; border-radius:4px;">
                         <label style="display:flex; align-items:center; gap:10px; font-weight:normal;">
                             <input type="checkbox" name="auto_sync" value="1" ${currentAutoSync ? 'checked' : ''} />
-                            Sincronizar automáticamente todos los pedidos
+                            Automatically sync all orders
                         </label>
                         <p style="font-size:12px; color:#666; margin-left:25px; margin-top:5px;">
-                            Si desactivas esto, solo se sincronizarán los pedidos que tengan el Tag especificado abajo.
+                            If disabled, only orders with the specified Tag below will be synced.
                         </p>
                         
-                        <label for="sync_tag" style="margin-top:10px;">Tag requerido (Opcional):</label>
+                        <label for="sync_tag" style="margin-top:10px;">Required Tag (Optional):</label>
                         <input type="text" id="sync_tag" name="sync_tag" placeholder="Ej: send_pathxpress" value="${currentSyncTag}" />
-                        <p style="font-size:12px; color:#666;">Si escribes un tag (ej: "send_pathxpress"), SOLO se sincronizarán los pedidos que tengan esa etiqueta en Shopify.</p>
+                        <p style="font-size:12px; color:#666;">If you enter a tag (e.g., "send_pathxpress"), ONLY orders with that tag in Shopify will be synced.</p>
                     </div>
 
-                    <h3 style="margin-top:20px; font-size:16px;">🚚 Mapeo de Servicios de Envío</h3>
-                    <p style="font-size:13px; color:#666;">Escribe el nombre exacto del método de envío en Shopify y el código de servicio en PathXpress (ej: DOM, SAMEDAY).</p>
+                    <h3 style="margin-top:20px; font-size:16px;">🚚 Shipping Service Mapping</h3>
+                    <p style="font-size:13px; color:#666;">Enter the exact shipping method name in Shopify and the service code in PathXpress (e.g., DOM, SAMEDAY).</p>
                     
                     <div id="mapping-container">
                         ${(() => {
@@ -742,21 +742,21 @@ app.get("/app", async (req, res) => {
             })()}
                     </div>
 
-                    <button type="submit">Guardar Configuración</button>
+                    <button type="submit">Save Settings</button>
                 </form>
               </div>
 
               <div class="card">
-                <h2>📦 Mis Envíos PathXpress</h2>
-                <p>Últimos 20 envíos procesados.</p>
+                <h2>📦 My PathXpress Shipments</h2>
+                <p>Last 20 processed shipments.</p>
                 <table style="width:100%; border-collapse:collapse; font-size:14px;">
                     <thead>
                         <tr style="background:#f4f6f8; text-align:left;">
                             <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Order #</th>
                             <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Waybill</th>
                             <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Status</th>
-                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Fecha</th>
-                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Acciones</th>
+                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Date</th>
+                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -767,8 +767,8 @@ app.get("/app", async (req, res) => {
             `
             : `
               <div class="card">
-                <p>Para comenzar, conecta tu tienda a PATHXPRESS.</p>
-                <a href="/auth?shop=${shop}" target="_top" style="background:#008060; color:white; padding:12px 20px; text-decoration:none; border-radius:4px; font-weight:bold;">Conectar ahora</a>
+                <p>To start, connect your shop to PATHXPRESS.</p>
+                <a href="/auth?shop=${shop}" target="_top" style="background:#008060; color:white; padding:12px 20px; text-decoration:none; border-radius:4px; font-weight:bold;">Connect now</a>
               </div>
             `
         }
@@ -784,7 +784,7 @@ app.post("/app/save-settings", express.urlencoded({ extended: true }), async (re
     const { shop, clientId, shopify_service, pathxpress_service, auto_sync, sync_tag } = req.body;
 
     if (!shop || !clientId) {
-        return res.send("Error: Faltan datos.");
+        return res.send("Error: Missing data.");
     }
 
     // Procesar mapeo de servicios
@@ -806,11 +806,11 @@ app.post("/app/save-settings", express.urlencoded({ extended: true }), async (re
             "UPDATE shopify_shops SET pathxpress_client_id = ?, service_mapping = ?, auto_sync = ?, sync_tag = ? WHERE shop_domain = ?",
             [clientId, JSON.stringify(serviceMapping), isAutoSync, sync_tag || null, shop]
         );
-        console.log(`⚙️ Configuración actualizada para ${shop}: ClientID = ${clientId}, AutoSync = ${isAutoSync}, Tag = ${sync_tag} `);
+        console.log(`⚙️ Settings updated for ${shop}: ClientID = ${clientId}, AutoSync = ${isAutoSync}, Tag = ${sync_tag} `);
         res.redirect(`/app?shop=${shop}`);
     } catch (err) {
-        console.error("Error guardando settings:", err);
-        res.send("Error guardando configuración.");
+        console.error("Error saving settings:", err);
+        res.send("Error saving settings.");
     }
 });
 
@@ -821,7 +821,7 @@ app.post("/app/save-settings", express.urlencoded({ extended: true }), async (re
 // 4.2) CARRIER SERVICE (Tarifas en Checkout)
 // ======================
 app.post("/api/shipping-rates", async (req, res) => {
-    console.log("💰 Solicitud de cotización recibida de Shopify");
+    console.log("💰 Rate request received from Shopify");
 
     try {
         const { rate } = req.body;
@@ -838,14 +838,14 @@ app.post("/api/shipping-rates", async (req, res) => {
         console.log(`Store detected: ${shop}`);
 
         if (!shop) {
-            console.warn("⚠️ No se pudo detectar shop domain, usando tarifas por defecto");
+            console.warn("⚠️ Could not detect shop domain, using default rates");
             return res.json(getDefaultRates(rate));
         }
 
         // 3. Obtener configuración de la tienda
         const shopData = await getShopFromDB(shop);
         if (!shopData || !shopData.pathxpress_client_id) {
-            console.warn(`⚠️ Tienda ${shop} sin clientId configurado, usando tarifas por defecto`);
+            console.warn(`⚠️ Shop ${shop} without clientId configured, using default rates`);
             return res.json(getDefaultRates(rate));
         }
 
@@ -858,7 +858,7 @@ app.post("/api/shipping-rates", async (req, res) => {
         );
 
         if (clientRows.length === 0) {
-            console.warn(`⚠️ Cliente ${clientId} no encontrado, usando tarifas por defecto`);
+            console.warn(`⚠️ Client ${clientId} not found, using default rates`);
             return res.json(getDefaultRates(rate));
         }
 
@@ -890,16 +890,16 @@ app.post("/api/shipping-rates", async (req, res) => {
 
             if (tierRows.length > 0) {
                 tierId = tierRows[0].id;
-                console.log(`📊 Tier automático asignado por volumen ${monthlyVolume}: Tier ${tierId}`);
+                console.log(`📊 Automatic tier assigned by volume ${monthlyVolume}: Tier ${tierId}`);
             }
         } else {
-            console.log(`🎯 Usando tier manual: ${tierId}`);
+            console.log(`🎯 Using manual tier: ${tierId}`);
         }
 
         // 6. Obtener tarifas de los tiers (DOM y SDD)
         // Si no hay tier asignado (ni manual ni auto), usar default
         if (!tierId) {
-            console.warn("⚠️ No se pudo determinar ningún tier, usando tarifas por defecto");
+            console.warn("⚠️ Could not determine any tier, using default rates");
             return res.json(getDefaultRates(rate));
         }
 
@@ -913,7 +913,7 @@ app.post("/api/shipping-rates", async (req, res) => {
         );
 
         if (domTierRows.length === 0) {
-            console.warn(`⚠️ No se encontró tier DOM para ${tierId}, usando tarifas por defecto`);
+            console.warn(`⚠️ DOM tier not found for ${tierId}, using default rates`);
             return res.json(getDefaultRates(rate));
         }
 
@@ -929,7 +929,7 @@ app.post("/api/shipping-rates", async (req, res) => {
         const domPrice = calculateTierPrice(domTier, totalWeightKg);
         const sddPrice = calculateTierPrice(sddTier, totalWeightKg);
 
-        console.log(`💵 Tarifas calculadas - DOM: ${domPrice} AED, SDD: ${sddPrice} AED (Peso: ${totalWeightKg}kg)`);
+        console.log(`💵 Calculated rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED (Weight: ${totalWeightKg}kg)`);
 
         // 9. Respuesta formato Shopify
         // Convertir a centavos (Shopify espera el precio en la unidad menor de la moneda, pero como string)
@@ -959,7 +959,7 @@ app.post("/api/shipping-rates", async (req, res) => {
 
         res.json(response);
     } catch (error) {
-        console.error("⛔ Error calculando tarifas:", error);
+        console.error("⛔ Error calculating rates:", error);
         res.json(getDefaultRates(req.body.rate));
     }
 });
@@ -1017,14 +1017,14 @@ function getDefaultRates(rate) {
 // ======================
 app.get("/auth", (req, res) => {
     const shop = req.query.shop;
-    if (!shop) return res.status(400).send("Falta el parámetro shop.");
+    if (!shop) return res.status(400).send("Missing shop parameter.");
 
     const scopes = process.env.SCOPES;
     const redirectUri = `${process.env.APP_URL}/auth/callback`;
     const clientId = process.env.SHOPIFY_API_KEY;
 
-    console.log("🔐 Iniciando OAuth...");
-    console.log("👉 Redirect URI generada:", redirectUri);
+    console.log("🔐 Starting OAuth...");
+    console.log("👉 Generated Redirect URI:", redirectUri);
 
     const installUrl =
         `https://${shop}/admin/oauth/authorize?` +
@@ -1034,7 +1034,7 @@ app.get("/auth", (req, res) => {
             redirect_uri: redirectUri,
         });
 
-    console.log("🔗 URL de instalación:", installUrl);
+    console.log("🔗 Installation URL:", installUrl);
 
     res.redirect(installUrl);
 });
@@ -1045,7 +1045,7 @@ app.get("/auth", (req, res) => {
 app.get("/auth/callback", async (req, res) => {
     const { shop, code, hmac } = req.query;
     if (!shop || !code || !hmac)
-        return res.status(400).send("Datos incompletos");
+        return res.status(400).send("Incomplete data");
 
     const map = { ...req.query };
     delete map["hmac"];
@@ -1057,7 +1057,7 @@ app.get("/auth/callback", async (req, res) => {
         .digest("hex");
 
     if (generatedHash !== hmac) {
-        return res.status(400).send("HMAC no válido");
+        return res.status(400).send("Invalid HMAC");
     }
 
     const tokenResponse = await fetch(
@@ -1076,12 +1076,12 @@ app.get("/auth/callback", async (req, res) => {
     const tokenData = await tokenResponse.json();
     const accessToken = tokenData.access_token;
 
-    console.log("🔥 SHOP INSTALADO:");
+    console.log("🔥 SHOP INSTALLED:");
     console.log("Shop:", shop);
     console.log("Access Token:", accessToken);
 
     shopsTokens[shop] = accessToken;
-    console.log("Tokens guardados en memoria:", shopsTokens);
+    console.log("Tokens saved in memory:", shopsTokens);
 
     // Registrar webhook
     await registerOrderWebhook(shop, accessToken);
@@ -1098,15 +1098,15 @@ app.get("/auth/callback", async (req, res) => {
         });
         const shopJson = await shopRes.json();
         if (shopJson.shop) {
-            console.log("🏪 Datos de la tienda obtenidos:", shopJson.shop.name);
+            console.log("🏪 Shop data obtained:", shopJson.shop.name);
             await saveShopToDB(shop, accessToken, shopJson.shop);
         }
     } catch (error) {
-        console.error("⚠️ Error obteniendo datos de la tienda:", error);
+        console.error("⚠️ Error getting shop data:", error);
     }
 
     return res.send(
-        "Instalación completada. Ya puedes cerrar esta ventana."
+        "Installation completed. You can now close this window."
     );
 });
 
@@ -1118,21 +1118,21 @@ app.get("/shopify/orders-test", async (req, res) => {
         req.query.shop || req.headers["x-shopify-shop-domain"] || "";
 
     if (!shop) {
-        return res.status(400).send("Falta el parámetro shop.");
+        return res.status(400).send("Missing shop parameter.");
     }
 
     const accessToken = shopsTokens[shop];
     if (!accessToken) {
         return res
             .status(401)
-            .send("Esta tienda no está conectada todavía con PATHXPRESS.");
+            .send("This shop is not yet connected to PATHXPRESS.");
     }
 
     try {
         const apiVersion = "2024-07";
         const url = `https://${shop}/admin/api/${apiVersion}/orders.json?limit=5&status=any`;
 
-        console.log("👉 Llamando a Shopify:", url);
+        console.log("👉 Calling Shopify:", url);
 
         const response = await fetch(url, {
             method: "GET",
@@ -1143,23 +1143,23 @@ app.get("/shopify/orders-test", async (req, res) => {
         });
 
         const text = await response.text();
-        console.log("🔎 Respuesta Shopify:", response.status, text);
+        console.log("🔎 Shopify Response:", response.status, text);
 
         let data;
         try {
             data = JSON.parse(text);
         } catch (e) {
-            console.error("No se pudo parsear JSON:", e);
+            console.error("Could not parse JSON:", e);
             return res
                 .status(500)
-                .send("Error parseando la respuesta de Shopify. Mira la consola.");
+                .send("Error parsing Shopify response. Check console.");
         }
 
         if (!response.ok) {
             return res
                 .status(response.status)
                 .send(
-                    `<pre>Error de Shopify (${response.status}):\n${text}</pre>`
+                    `<pre>Shopify Error (${response.status}):\n${text}</pre>`
                 );
         }
 
@@ -1167,13 +1167,13 @@ app.get("/shopify/orders-test", async (req, res) => {
 
         let html = `
       <html>
-        <head><meta charset="utf-8"><title>Órdenes Shopify</title></head>
+        <head><meta charset="utf-8"><title>Shopify Orders</title></head>
         <body style="font-family: Arial; padding: 20px;">
-          <h1>Últimas órdenes de ${shop}</h1>
+          <h1>Latest orders from ${shop}</h1>
     `;
 
         if (orders.length === 0) {
-            html += "<p>No hay órdenes todavía.</p>";
+            html += "<p>No orders yet.</p>";
         } else {
             html += "<ul>";
             for (const order of orders) {
@@ -1183,17 +1183,17 @@ app.get("/shopify/orders-test", async (req, res) => {
         }
 
         html += `
-          <p><a href="/app?shop=${shop}">Volver a PATHXPRESS Portal</a></p>
+          <p><a href="/app?shop=${shop}">Back to PATHXPRESS Portal</a></p>
         </body>
       </html>
     `;
 
         res.send(html);
     } catch (err) {
-        console.error("Error leyendo órdenes de Shopify:", err);
+        console.error("Error reading Shopify orders:", err);
         res
             .status(500)
-            .send("Error al leer órdenes de Shopify (mira la consola).");
+            .send("Error reading Shopify orders (check console).");
     }
 });
 
@@ -1204,8 +1204,8 @@ async function registerOrderWebhook(shop, accessToken) {
     const apiVersion = "2024-07";
     const webhookUrl = `${process.env.APP_URL}/webhooks/shopify/orders`;
 
-    console.log("📡 Registrando webhook para tienda:", shop);
-    console.log("📡 URL del webhook:", webhookUrl);
+    console.log("📡 Registering webhook for shop:", shop);
+    console.log("📡 Webhook URL:", webhookUrl);
 
     const response = await fetch(
         `https://${shop}/admin/api/${apiVersion}/webhooks.json`,
@@ -1226,7 +1226,7 @@ async function registerOrderWebhook(shop, accessToken) {
     );
 
     const body = await response.text();
-    console.log("🔔 Registro Webhook:", response.status, body);
+    console.log("🔔 Webhook Registration:", response.status, body);
 }
 
 // ======================
@@ -1236,7 +1236,7 @@ async function registerCarrierService(shop, accessToken) {
     const apiVersion = "2024-07";
     const callbackUrl = `${process.env.APP_URL}/api/shipping-rates`;
 
-    console.log("🚚 Registrando CarrierService en:", shop);
+    console.log("🚚 Registering CarrierService in:", shop);
 
     try {
         // 1. Verificar si ya existe
@@ -1247,7 +1247,7 @@ async function registerCarrierService(shop, accessToken) {
         const existing = (getData.carrier_services || []).find(cs => cs.name === "PathXpress Shipping");
 
         if (existing) {
-            console.log("✅ CarrierService ya existe. ID:", existing.id);
+            console.log("✅ CarrierService already exists. ID:", existing.id);
             // Opcional: Actualizar URL si cambió
             return;
         }
@@ -1270,12 +1270,12 @@ async function registerCarrierService(shop, accessToken) {
 
         const json = await response.json();
         if (response.ok) {
-            console.log("✅ CarrierService registrado exitosamente:", json.carrier_service.id);
+            console.log("✅ CarrierService registered successfully:", json.carrier_service.id);
         } else {
-            console.error("⚠️ Error registrando CarrierService:", JSON.stringify(json));
+            console.error("⚠️ Error registering CarrierService:", JSON.stringify(json));
         }
     } catch (err) {
-        console.error("⛔ Excepción registrando CarrierService:", err);
+        console.error("⛔ Exception registering CarrierService:", err);
     }
 }
 
@@ -1284,7 +1284,7 @@ async function registerCarrierService(shop, accessToken) {
 // ======================
 app.listen(PORT, () => {
     console.log(
-        `Servidor PATHXPRESS Shopify escuchando en http://localhost:${PORT}`
+        `PATHXPRESS Shopify Server listening on http://localhost:${PORT}`
     );
 
     // Iniciar Cron/Intervalo de Sincronización (cada 60 segundos)
@@ -1293,15 +1293,15 @@ app.listen(PORT, () => {
     // Iniciar Cron de Reintentos (cada 5 minutos)
     setInterval(processRetryQueue, 5 * 60 * 1000);
 
-    console.log("🔄 Sincronización automática iniciada (cada 60s).");
-    console.log("🛡️ Sistema de reintentos iniciado (cada 5m).");
+    console.log("🔄 Automatic synchronization started (every 60s).");
+    console.log("🛡️ Retry system started (every 5m).");
 });
 
 // ======================
 // 11) SISTEMA DE REINTENTOS (Error Handling)
 // ======================
 async function processRetryQueue() {
-    console.log("🛡️ Revisando cola de reintentos...");
+    console.log("🛡️ Checking retry queue...");
     try {
         // Buscar items pendientes con menos de 5 intentos
         const [rows] = await db.execute(`
@@ -1312,7 +1312,7 @@ async function processRetryQueue() {
 
         if (rows.length === 0) return;
 
-        console.log(`🛡️ Procesando ${rows.length} reintentos...`);
+        console.log(`🛡️ Processing ${rows.length} retries...`);
 
         for (const row of rows) {
             const { id, shop_domain, payload, retry_count } = row;
@@ -1322,7 +1322,7 @@ async function processRetryQueue() {
                 let order = payload;
                 if (typeof order === 'string') order = JSON.parse(order);
 
-                console.log(`🔄 Reintentando orden ${order.name} (Intento ${retry_count + 1})...`);
+                console.log(`🔄 Retrying order ${order.name} (Attempt ${retry_count + 1})...`);
 
                 // 1. Obtener info tienda
                 const shopData = await getShopFromDB(shop_domain);
@@ -1334,10 +1334,10 @@ async function processRetryQueue() {
 
                 // 3. Marcar como procesado
                 await db.execute("UPDATE webhook_retries SET status = 'PROCESSED', updated_at = NOW() WHERE id = ?", [id]);
-                console.log(`✅ Reintento exitoso para ID ${id}`);
+                console.log(`✅ Successful retry for ID ${id}`);
 
             } catch (err) {
-                console.error(`⛔ Falló reintento ID ${id}:`, err.message);
+                console.error(`⛔ Retry failed ID ${id}:`, err.message);
                 // Incrementar contador
                 await db.execute(`
                     UPDATE webhook_retries 
@@ -1349,7 +1349,7 @@ async function processRetryQueue() {
             }
         }
     } catch (err) {
-        console.error("⛔ Error en ciclo de reintentos:", err);
+        console.error("⛔ Error in retry cycle:", err);
     }
 }
 
@@ -1357,7 +1357,7 @@ async function processRetryQueue() {
 // 10) LOGICA DE SINCRONIZACIÓN (Two-Way Sync)
 // ======================
 async function syncShipmentsToShopify() {
-    console.log("🔄 Ejecutando sincronización de estados...");
+    console.log("🔄 Running status synchronization...");
     try {
         // 1. Buscar envíos que:
         //    - Estén en shopify_shipments (tenemos shop_domain y order_id)
@@ -1383,14 +1383,14 @@ async function syncShipmentsToShopify() {
 
         if (rows.length === 0) return;
 
-        console.log(`🔄 Encontrados ${rows.length} envíos para sincronizar con Shopify.`);
+        console.log(`🔄 Found ${rows.length} shipments to sync with Shopify.`);
 
         for (const row of rows) {
             await fulfillShopifyOrder(row);
         }
 
     } catch (err) {
-        console.error("⛔ Error en ciclo de sincronización:", err);
+        console.error("⛔ Error in synchronization cycle:", err);
     }
 }
 
@@ -1401,7 +1401,7 @@ async function fulfillShopifyOrder(row) {
         // 1. Obtener Token de la tienda
         const shopData = await getShopFromDB(shop_domain);
         if (!shopData || !shopData.access_token) {
-            console.error(`⚠️ No hay token para ${shop_domain}, saltando.`);
+            console.error(`⚠️ No token for ${shop_domain}, skipping.`);
             return;
         }
         const accessToken = shopData.access_token;
@@ -1415,7 +1415,7 @@ async function fulfillShopifyOrder(row) {
         const locationId = locJson.locations?.[0]?.id;
 
         if (!locationId) {
-            console.error(`⚠️ No se encontró Location ID para ${shop_domain}`);
+            console.error(`⚠️ Location ID not found for ${shop_domain}`);
             return;
         }
 
@@ -1450,7 +1450,7 @@ async function fulfillShopifyOrder(row) {
         const openFO = fulfillmentOrders.find(fo => fo.status === 'open' || fo.status === 'in_progress');
 
         if (!openFO) {
-            console.log(`ℹ️ La orden ${shop_order_id} no tiene fulfillment_orders abiertas. Marcamos como sync localmente.`);
+            console.log(`ℹ️ Order ${shop_order_id} has no open fulfillment_orders. Marking as locally synced.`);
             // Actualizamos localmente para no reintentar infinito
             await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = 'ALREADY_FULFILLED' WHERE id = ?", [shipment_id]);
             return;
@@ -1485,16 +1485,16 @@ async function fulfillShopifyOrder(row) {
 
         if (createRes.ok && createJson.fulfillment) {
             const newFulfillmentId = createJson.fulfillment.id;
-            console.log(`✅ Fulfillment creado en Shopify: ${newFulfillmentId} para orden ${shop_order_id}`);
+            console.log(`✅ Fulfillment created in Shopify: ${newFulfillmentId} for order ${shop_order_id}`);
 
             // 4. Actualizar DB local
             await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = ? WHERE id = ?", [newFulfillmentId, shipment_id]);
         } else {
-            console.error(`⛔ Error creando fulfillment en Shopify:`, JSON.stringify(createJson));
+            console.error(`⛔ Error creating fulfillment in Shopify:`, JSON.stringify(createJson));
         }
 
     } catch (err) {
-        console.error(`⛔ Excepción sincronizando orden ${shop_order_id}:`, err);
+        console.error(`⛔ Exception syncing order ${shop_order_id}:`, err);
     }
 }
 
@@ -1553,7 +1553,7 @@ function orderToShipment(order, shop, shopData) {
     const clientId = shopData?.pathxpress_client_id || 1;
 
     if (!shopData?.pathxpress_client_id) {
-        console.warn(`⚠️ La tienda ${shop} NO tiene configurado pathxpress_client_id. Usando default: 1`);
+        console.warn(`⚠️ Shop ${shop} does NOT have pathxpress_client_id configured. Using default: 1`);
     }
 
     // Determinar Service Type
@@ -1571,7 +1571,7 @@ function orderToShipment(order, shop, shopData) {
 
         if (mapping && mapping[shippingTitle]) {
             serviceType = mapping[shippingTitle];
-            console.log(`🚚 Mapeado servicio '${shippingTitle}' -> '${serviceType}'`);
+            console.log(`🚚 Mapped service '${shippingTitle}' -> '${serviceType}'`);
         }
     }
 

@@ -25,9 +25,9 @@ async function createRetriesTable() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
         `);
-        console.log("✅ Tabla webhook_retries creada.");
+        console.log("✅ Table webhook_retries created.");
     } catch (err) {
-        console.error("❌ Error creando tabla webhook_retries:", err);
+        console.error("❌ Error creating table webhook_retries:", err);
     } finally {
         await db.end();
     }

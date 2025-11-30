@@ -20,12 +20,12 @@ async function updateTable() {
             ALTER TABLE shopify_shipments
             ADD COLUMN shopify_fulfillment_id VARCHAR(255) NULL
         `);
-        console.log("✅ Columna shopify_fulfillment_id añadida.");
+        console.log("✅ Column shopify_fulfillment_id added.");
     } catch (err) {
         if (err.code === 'ER_DUP_FIELDNAME') {
-            console.log("ℹ️ La columna shopify_fulfillment_id ya existe.");
+            console.log("ℹ️ Column shopify_fulfillment_id already exists.");
         } else {
-            console.error("❌ Error alterando tabla:", err);
+            console.error("❌ Error altering table:", err);
         }
     } finally {
         await db.end();

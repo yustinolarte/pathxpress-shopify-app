@@ -30,9 +30,9 @@ async function createShopsTable() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
         `);
-        console.log("✅ Tabla shopify_shops creada o ya existente.");
+        console.log("✅ Table shopify_shops created or already exists.");
     } catch (err) {
-        console.error("❌ Error creando tabla shopify_shops:", err);
+        console.error("❌ Error creating table shopify_shops:", err);
     } finally {
         await db.end();
     }

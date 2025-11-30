@@ -18,12 +18,12 @@ async function updateTable() {
             ADD COLUMN auto_sync BOOLEAN DEFAULT TRUE,
             ADD COLUMN sync_tag VARCHAR(255) DEFAULT NULL
         `);
-        console.log("✅ Columnas auto_sync y sync_tag añadidas a shopify_shops.");
+        console.log("✅ Columns auto_sync and sync_tag added to shopify_shops.");
     } catch (err) {
         if (err.code === 'ER_DUP_FIELDNAME') {
-            console.log("ℹ️ Las columnas ya existen.");
+            console.log("ℹ️ Columns already exist.");
         } else {
-            console.error("❌ Error alterando tabla:", err);
+            console.error("❌ Error altering table:", err);
         }
     } finally {
         await db.end();
