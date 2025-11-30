@@ -341,17 +341,17 @@ const webhookMiddleware = [
 ];
 
 // --- GDPR / Mandatory Webhooks ---
-app.post("/webhooks/shopify/customers/data_request", webhookMiddleware, (req, res) => {
+app.post("/customers/data_request", webhookMiddleware, (req, res) => {
     console.log("🔒 GDPR: Customer Data Request received");
     res.sendStatus(200);
 });
 
-app.post("/webhooks/shopify/customers/redact", webhookMiddleware, (req, res) => {
+app.post("/customers/redact", webhookMiddleware, (req, res) => {
     console.log("🔒 GDPR: Customer Redact received");
     res.sendStatus(200);
 });
 
-app.post("/webhooks/shopify/shop/redact", webhookMiddleware, (req, res) => {
+app.post("/shop/redact", webhookMiddleware, (req, res) => {
     console.log("🔒 GDPR: Shop Redact received");
     res.sendStatus(200);
 });
