@@ -1146,7 +1146,6 @@ app.get("/auth/callback", async (req, res) => {
 
     // Registrar webhook
     await registerOrderWebhook(shop, accessToken);
-    await registerMandatoryWebhooks(shop, accessToken);
 
     // Registrar Carrier Service (Tarifas en checkout)
     await registerCarrierService(shop, accessToken);
@@ -1259,53 +1258,7 @@ app.get("/shopify/orders-test", async (req, res) => {
     }
 });
 
-async function registerMandatoryWebhooks(shop, accessToken) {
-    const apiVersion = "2024-07";
-    const baseUrl = `https://${shop}/admin/api/${apiVersion}/webhooks.json`;
 
-    // Helper para no repetir
-    async function createWebhook(topic, addressPath) {
-        const address = `${process.env.APP_URL}${addressPath}`;
-        const res = await fetch(baseUrl, {
-            method: "POST",
-            headers: {
-                "X-Shopify-Access-Token": accessToken,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                webhook: {
-                    topic,
-                    address,
-                    format: "json",
-                },
-            }),
-        });
-
-        const text = await res.text();
-        if (res.status === 422 && text.includes("taken")) {
-            console.log(`🔔 Webhook ${topic} already registered.`);
-        } else {
-            console.log(`🔔 Registro webhook ${topic}:`, res.status, text);
-        }
-    }
-
-    try {
-        await createWebhook(
-            "customers/data_request",
-            "/customers/data_request"
-        );
-        await createWebhook(
-            "customers/redact",
-            "/customers/redact"
-        );
-        await createWebhook(
-            "shop/redact",
-            "/shop/redact"
-        );
-    } catch (err) {
-        console.error("⛔ Error registrando webhooks GDPR:", err);
-    }
-}
 
 // ======================
 // 8) REGISTRO DEL WEBHOOK
