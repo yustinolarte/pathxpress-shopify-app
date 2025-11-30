@@ -341,21 +341,21 @@ const webhookMiddleware = [
 ];
 
 // --- GDPR / Mandatory Webhooks ---
-app.post("/customers/data_request", webhookMiddleware, (req, res) => {
+app.post("/webhooks/shopify/customers/data_request", webhookMiddleware, (req, res) => {
     console.log("🔒 GDPR: Customer Data Request received");
     console.log("Headers:", JSON.stringify(req.headers, null, 2));
     console.log("Body:", req.body.toString());
     res.status(200).send();
 });
 
-app.post("/customers/redact", webhookMiddleware, (req, res) => {
+app.post("/webhooks/shopify/customers/redact", webhookMiddleware, (req, res) => {
     console.log("🔒 GDPR: Customer Redact received");
     console.log("Headers:", JSON.stringify(req.headers, null, 2));
     console.log("Body:", req.body.toString());
     res.status(200).send();
 });
 
-app.post("/shop/redact", webhookMiddleware, (req, res) => {
+app.post("/webhooks/shopify/shop/redact", webhookMiddleware, (req, res) => {
     console.log("🔒 GDPR: Shop Redact received");
     console.log("Headers:", JSON.stringify(req.headers, null, 2));
     console.log("Body:", req.body.toString());
