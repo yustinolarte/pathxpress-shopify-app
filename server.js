@@ -319,7 +319,10 @@ function verifyShopifyWebhook(req, res, next) {
             .digest("base64");
 
         if (generatedHash !== hmac) {
-            console.error(`⛔ Invalid HMAC for shop ${shop}`);
+            console.error(`⛔ HMAC Verification Failed!`);
+            console.error(`   Shop: ${shop}`);
+            console.error(`   Received HMAC: ${hmac}`);
+            console.error(`   Calculated:    ${generatedHash}`);
             return res.status(401).send("Unauthorized: Invalid HMAC");
         }
 
@@ -335,8 +338,9 @@ function verifyShopifyWebhook(req, res, next) {
 // ======================
 
 // Middleware chain for webhooks: Raw Body -> HMAC Verification
+// Middleware chain for webhooks: Raw Body -> HMAC Verification
 const webhookMiddleware = [
-    express.raw({ type: "application/json" }),
+    express.raw({ type: "*/*" }), // Capture all content types as Buffer
     verifyShopifyWebhook
 ];
 
