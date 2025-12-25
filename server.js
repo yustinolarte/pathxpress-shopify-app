@@ -810,20 +810,8 @@ app.get("/app", async (req, res) => {
                 pdf.setLineWidth(2);
                 pdf.line(0, 146, pageWidth, 146);
                 
-                // Descargar PDF usando link dinámico (funciona en iframe de Shopify)
-                try {
-                    const pdfDataUri = pdf.output('datauristring');
-                    const link = document.createElement('a');
-                    link.href = pdfDataUri;
-                    link.download = 'waybill-' + (shipment.waybillNumber || 'label') + '.pdf';
-                    link.target = '_top';
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                } catch (downloadError) {
-                    console.error('Download error:', downloadError);
-                    alert('Could not download PDF. Please try again or disable popup blocker.');
-                }
+                // Download PDF
+                pdf.save('waybill-' + (shipment.waybillNumber || 'label') + '.pdf');
             }
             
             // Helper para obtener código de ciudad
