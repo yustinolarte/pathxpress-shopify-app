@@ -641,115 +641,196 @@ app.get("/app", async (req, res) => {
         <script>
             function generateWaybillPDF(shipment) {
                 const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
-                pdf.setFillColor('#1e40af');
-                pdf.rect(0, 0, 210, 40, 'F');
-                pdf.setTextColor(255, 255, 255);
-                pdf.setFontSize(24);
+                // Formato A6 (105mm x 148mm) - tamaño estándar de etiqueta de envío
+                const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [105, 148] });
+                
+                const pageWidth = 105;
+                const margin = 5;
+                
+                // ===== HEADER =====
+                // Borde superior azul
+                pdf.setDrawColor(30, 64, 175);
+                pdf.setLineWidth(2);
+                pdf.line(0, 2, pageWidth, 2);
+                
+                // Logo PATHXPRESS
+                pdf.setFontSize(14);
                 pdf.setFont('helvetica', 'bold');
-                pdf.text('PATHXPRESS', 15, 20);
-                pdf.setFontSize(10);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text('Reliable Delivery Services in the UAE', 15, 28);
-                pdf.setFontSize(16);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Waybill: ' + shipment.waybillNumber, 15, 36);
-
-                const canvas = document.createElement('canvas');
-                try {
-                    JsBarcode(canvas, shipment.waybillNumber, { format: 'CODE128', width: 2, height: 60, displayValue: false });
-                    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 140, 10, 60, 25);
-                } catch (e) { console.error(e); }
-
-                pdf.setFillColor('#dc2626');
-                pdf.roundedRect(140, 36, 60, 8, 2, 2, 'F');
-                pdf.setTextColor(255, 255, 255);
-                pdf.setFontSize(10);
-                pdf.text(shipment.serviceType === 'SAMEDAY' ? 'EXPRESS' : 'STANDARD', 170, 41, { align: 'center' });
-
-                pdf.setTextColor('#1f2937');
-                let yPos = 55;
-                pdf.setFillColor('#f3f4f6');
-                pdf.rect(10, yPos, 90, 8, 'F');
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('SHIPPER INFORMATION', 15, yPos + 5.5);
-                yPos += 12;
-                pdf.setFontSize(10);
-                pdf.text(shipment.shipperName || '', 15, yPos);
-                yPos += 5;
-                pdf.setFont('helvetica', 'normal');
-                pdf.text(shipment.shipperAddress || '', 15, yPos);
-                yPos += 5;
-                pdf.text((shipment.shipperCity || '') + ', ' + (shipment.shipperCountry || ''), 15, yPos);
-                yPos += 5;
-                pdf.text('Phone: ' + (shipment.shipperPhone || ''), 15, yPos);
-
-                yPos = 55;
-                pdf.setFillColor('#f3f4f6');
-                pdf.rect(110, yPos, 90, 8, 'F');
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('CONSIGNEE INFORMATION', 115, yPos + 5.5);
-                yPos += 12;
-                pdf.setFontSize(10);
-                pdf.text(shipment.customerName || '', 115, yPos);
-                yPos += 5;
-                pdf.setFont('helvetica', 'normal');
-                pdf.text(shipment.address || '', 115, yPos);
-                yPos += 5;
-                pdf.text((shipment.city || '') + ', ' + (shipment.destinationCountry || ''), 115, yPos);
-                yPos += 5;
-                pdf.text('Phone: ' + (shipment.customerPhone || ''), 115, yPos);
-
-                if (shipment.codRequired && shipment.codAmount) {
-                    yPos = 100;
-                    pdf.setFillColor(255, 165, 0);
-                    pdf.rect(10, yPos, 190, 15, 'F');
-                    pdf.setTextColor(255, 255, 255);
-                    pdf.setFontSize(14);
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('⚠ CASH ON DELIVERY (COD)', 15, yPos + 6);
-                    pdf.setFontSize(12);
-                    pdf.text('COLLECT: ' + shipment.codAmount + ' ' + (shipment.codCurrency || 'AED'), 15, yPos + 12);
-                    pdf.setTextColor('#1f2937');
-                    yPos += 20;
-                } else {
-                    yPos = 100;
-                }
-
-                pdf.setFillColor('#f3f4f6');
-                pdf.rect(10, yPos, 190, 8, 'F');
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('SHIPMENT DETAILS', 15, yPos + 5.5);
-                yPos += 15;
-                pdf.setFontSize(10);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Pieces:', 15, yPos);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text((shipment.pieces || 1).toString(), 35, yPos);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Weight:', 75, yPos);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text((shipment.weight || 0) + ' kg', 95, yPos);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Status:', 135, yPos);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text((shipment.status || '').replace(/_/g, ' ').toUpperCase(), 155, yPos);
-
-                yPos = 150;
-                try {
-                    const canvas2 = document.createElement('canvas');
-                    JsBarcode(canvas2, shipment.waybillNumber, { format: 'CODE128', width: 3, height: 80, displayValue: true, fontSize: 14 });
-                    pdf.addImage(canvas2.toDataURL('image/png'), 'PNG', 40, yPos, 130, 40);
-                } catch (e) { console.error(e); }
-
+                pdf.setTextColor(0, 0, 0);
+                pdf.text('PATH', margin, 10);
+                pdf.setTextColor(220, 38, 38); // Rojo para la X
+                pdf.text('X', margin + 16, 10);
+                pdf.setTextColor(0, 0, 0);
+                pdf.text('PRESS', margin + 20, 10);
+                
+                // Fecha y Waybill Number (derecha)
                 pdf.setFontSize(8);
-                pdf.setTextColor(128, 128, 128);
-                pdf.text('PATHXPRESS FZCO | Dubai, UAE | info@pathxpress.ae', 105, 270, { align: 'center' });
-                pdf.save('waybill-' + shipment.waybillNumber + '.pdf');
+                pdf.setFont('helvetica', 'normal');
+                const today = new Date().toLocaleDateString('en-GB');
+                pdf.text(today, pageWidth - margin, 7, { align: 'right' });
+                pdf.setFont('helvetica', 'bold');
+                pdf.setFontSize(9);
+                pdf.text(shipment.waybillNumber || 'PX202500000', pageWidth - margin, 12, { align: 'right' });
+                
+                // Línea separadora
+                pdf.setDrawColor(200, 200, 200);
+                pdf.setLineWidth(0.3);
+                pdf.line(margin, 15, pageWidth - margin, 15);
+                
+                // ===== FROM SECTION =====
+                let y = 20;
+                pdf.setFontSize(7);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(100, 100, 100);
+                pdf.text('FROM:', margin, y);
+                pdf.setTextColor(0, 0, 0);
+                pdf.setFontSize(9);
+                pdf.text(shipment.shipperName || 'Sender', margin + 12, y);
+                y += 4;
+                pdf.setFontSize(7);
+                pdf.setFont('helvetica', 'normal');
+                pdf.setTextColor(100, 100, 100);
+                pdf.text(shipment.shipperCity || 'Dubai', margin + 12, y);
+                
+                // ===== TO SECTION =====
+                y += 8;
+                pdf.setFontSize(7);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(100, 100, 100);
+                pdf.text('TO:', margin, y);
+                pdf.setTextColor(0, 0, 0);
+                pdf.setFontSize(10);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(shipment.customerName || 'Customer', margin + 12, y);
+                y += 5;
+                pdf.setFontSize(8);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(shipment.customerPhone || '', margin + 12, y);
+                y += 4;
+                pdf.setFontSize(7);
+                const address = shipment.address || '';
+                const addressLines = pdf.splitTextToSize(address, 50);
+                pdf.text(addressLines, margin + 12, y);
+                y += addressLines.length * 3 + 2;
+                pdf.setFont('helvetica', 'bold');
+                pdf.text((shipment.city || 'Dubai') + ', United Arab Emirates', margin + 12, y);
+                
+                // ===== CITY CODE BOX =====
+                const boxX = 70;
+                const boxY = 28;
+                pdf.setFillColor(30, 64, 175);
+                pdf.roundedRect(boxX, boxY, 20, 18, 2, 2, 'F');
+                pdf.setTextColor(255, 255, 255);
+                pdf.setFontSize(14);
+                pdf.setFont('helvetica', 'bold');
+                // Mapeo de ciudad a código
+                const cityCode = getCityCode(shipment.city || shipment.emirate || 'Dubai');
+                pdf.text(cityCode, boxX + 10, boxY + 8, { align: 'center' });
+                pdf.setFontSize(8);
+                pdf.text(shipment.serviceType || 'DOM', boxX + 10, boxY + 14, { align: 'center' });
+                
+                // ===== QR CODE =====
+                // Crear QR con datos del envío
+                try {
+                    const qrData = JSON.stringify({
+                        wb: shipment.waybillNumber,
+                        to: shipment.customerName,
+                        city: shipment.city
+                    });
+                    // Usamos un placeholder ya que QRCode requiere librería adicional
+                    pdf.setFillColor(240, 240, 240);
+                    pdf.rect(boxX + 22, boxY, 18, 18, 'F');
+                    pdf.setFontSize(5);
+                    pdf.setTextColor(150, 150, 150);
+                    pdf.text('QR', boxX + 31, boxY + 10, { align: 'center' });
+                } catch (e) { console.error(e); }
+                
+                // ===== DETAILS TABLE =====
+                y = 65;
+                pdf.setDrawColor(0, 0, 0);
+                pdf.setLineWidth(0.5);
+                
+                // Headers
+                const cols = [margin, 30, 50, 70];
+                const colWidth = 23;
+                
+                pdf.setFillColor(245, 245, 245);
+                pdf.rect(margin, y, pageWidth - margin * 2, 6, 'F');
+                pdf.setFontSize(6);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(100, 100, 100);
+                pdf.text('PCS', cols[0] + 10, y + 4, { align: 'center' });
+                pdf.text('KG', cols[1] + 8, y + 4, { align: 'center' });
+                pdf.text('SERVICE', cols[2] + 8, y + 4, { align: 'center' });
+                pdf.text('STATUS', cols[3] + 12, y + 4, { align: 'center' });
+                
+                // Values
+                y += 6;
+                pdf.setFillColor(255, 255, 255);
+                pdf.rect(margin, y, pageWidth - margin * 2, 8, 'FD');
+                pdf.setFontSize(10);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(0, 0, 0);
+                pdf.text((shipment.pieces || 1).toString(), cols[0] + 10, y + 5.5, { align: 'center' });
+                pdf.text((shipment.weight || 0.5).toFixed(1), cols[1] + 8, y + 5.5, { align: 'center' });
+                pdf.text(shipment.serviceType || 'DOM', cols[2] + 8, y + 5.5, { align: 'center' });
+                const status = shipment.codRequired ? 'COD' : 'PREPAID';
+                pdf.text(status, cols[3] + 12, y + 5.5, { align: 'center' });
+                
+                // Líneas verticales de la tabla
+                pdf.setLineWidth(0.2);
+                pdf.line(cols[1], y - 6, cols[1], y + 8);
+                pdf.line(cols[2], y - 6, cols[2], y + 8);
+                pdf.line(cols[3], y - 6, cols[3], y + 8);
+                
+                // ===== BARCODE =====
+                y = 90;
+                try {
+                    const barcodeCanvas = document.createElement('canvas');
+                    JsBarcode(barcodeCanvas, shipment.waybillNumber || 'PX202500000', { 
+                        format: 'CODE128', 
+                        width: 2, 
+                        height: 50, 
+                        displayValue: true,
+                        fontSize: 12,
+                        margin: 5,
+                        background: '#ffffff'
+                    });
+                    pdf.addImage(barcodeCanvas.toDataURL('image/png'), 'PNG', margin + 5, y, pageWidth - margin * 2 - 10, 35);
+                } catch (e) { console.error(e); }
+                
+                // ===== FOOTER =====
+                pdf.setFontSize(6);
+                pdf.setTextColor(30, 64, 175);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text('pathxpress.net | +971 522803433', pageWidth / 2, 142, { align: 'center' });
+                
+                // Borde inferior azul
+                pdf.setDrawColor(30, 64, 175);
+                pdf.setLineWidth(2);
+                pdf.line(0, 146, pageWidth, 146);
+                
+                pdf.save('waybill-' + (shipment.waybillNumber || 'label') + '.pdf');
+            }
+            
+            // Helper para obtener código de ciudad
+            function getCityCode(city) {
+                const codes = {
+                    'Dubai': 'DXB',
+                    'Abu Dhabi': 'AUH',
+                    'Sharjah': 'SHJ',
+                    'Ajman': 'AJM',
+                    'Ras Al Khaimah': 'RAK',
+                    'Fujairah': 'FUJ',
+                    'Umm Al Quwain': 'UAQ',
+                    'Al Ain': 'AAN'
+                };
+                for (const [name, code] of Object.entries(codes)) {
+                    if (city && city.toLowerCase().includes(name.toLowerCase())) {
+                        return code;
+                    }
+                }
+                return 'UAE';
             }
         </script>
       </head>
@@ -780,9 +861,19 @@ app.get("/app", async (req, res) => {
               </div>
 
               <div class="card">
-                <h2>⚙️ General Settings</h2>
-                <form action="/app/save-settings" method="POST">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                    <h2 style="margin:0;">⚙️ General Settings</h2>
+                    ${currentClientId ? `
+                        <button type="button" id="editBtn" onclick="toggleEditMode()" style="background:#5c6ac4; padding:8px 20px;">
+                            ✏️ Edit Settings
+                        </button>
+                    ` : ''}
+                </div>
+                
+                <form action="/app/save-settings" method="POST" id="settingsForm">
                     <input type="hidden" name="shop" value="${shop}" />
+                    
+                    <fieldset id="settingsFieldset" ${currentClientId ? 'disabled' : ''} style="border:none; padding:0; margin:0;">
                     
                     <label for="clientId">PathXpress Client ID:</label>
                     <div style="display:flex; gap:10px; align-items:center;">
@@ -819,6 +910,25 @@ app.get("/app", async (req, res) => {
                         if (document.getElementById('clientId').value) {
                             validateClientId(document.getElementById('clientId').value);
                         }
+                        
+                        // Toggle edit mode
+                        function toggleEditMode() {
+                            const fieldset = document.getElementById('settingsFieldset');
+                            const editBtn = document.getElementById('editBtn');
+                            const saveBtn = document.getElementById('saveBtn');
+                            
+                            if (fieldset.disabled) {
+                                fieldset.disabled = false;
+                                editBtn.innerHTML = '❌ Cancel';
+                                editBtn.style.background = '#dc2626';
+                                saveBtn.style.display = 'inline-block';
+                            } else {
+                                fieldset.disabled = true;
+                                editBtn.innerHTML = '✏️ Edit Settings';
+                                editBtn.style.background = '#5c6ac4';
+                                saveBtn.style.display = 'none';
+                            }
+                        }
                     </script>
 
                     <h3 style="margin-top:20px; font-size:16px;">🔍 Sync Filters</h3>
@@ -846,8 +956,10 @@ app.get("/app", async (req, res) => {
                             <option value="NEXTDAY" ${currentServiceType === 'NEXTDAY' ? 'selected' : ''}>📦 NEXTDAY - Next Day Delivery</option>
                         </select>
                     </div>
+                    
+                    </fieldset>
 
-                    <button type="submit">Save Settings</button>
+                    <button type="submit" id="saveBtn" style="${currentClientId ? 'display:none;' : ''}">Save Settings</button>
                 </form>
               </div>
 
@@ -983,9 +1095,10 @@ app.post("/api/shipping-rates", async (req, res) => {
 
         const clientId = shopData.pathxpress_client_id;
 
-        // 4. Obtener cliente y su tier
+        // 4. Obtener cliente con todas sus tarifas
         const [clientRows] = await db.execute(
-            "SELECT manualRateTierId FROM clientAccounts WHERE id = ?",
+            `SELECT manualRateTierId, customDomBaseRate, customDomPerKg, customSddBaseRate, customSddPerKg 
+             FROM clientAccounts WHERE id = ?`,
             [clientId]
         );
 
@@ -995,85 +1108,51 @@ app.post("/api/shipping-rates", async (req, res) => {
         }
 
         const client = clientRows[0];
-        let tierId = client.manualRateTierId;
 
-        // 5. Si no tiene tier manual, calcular por volumen
-        if (!tierId) {
-            // Contar envíos del último mes
-            const [volumeRows] = await db.execute(`
-                SELECT COUNT(*) as shipmentCount 
-                FROM orders 
-                WHERE clientId = ? 
-                AND createdAt >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
-            `, [clientId]);
-
-            const monthlyVolume = volumeRows[0]?.shipmentCount || 0;
-
-            // Buscar tier automático por volumen para DOM
-            const [tierRows] = await db.execute(`
-                SELECT id FROM rateTiers 
-                WHERE serviceType = 'DOM' 
-                AND minVolume <= ? 
-                AND (maxVolume IS NULL OR maxVolume >= ?)
-                AND isActive = 1
-                ORDER BY minVolume DESC 
-                LIMIT 1
-            `, [monthlyVolume, monthlyVolume]);
-
-            if (tierRows.length > 0) {
-                tierId = tierRows[0].id;
-                console.log(`📊 Automatic tier assigned by volume ${monthlyVolume}: Tier ${tierId}`);
-            }
-        } else {
-            console.log(`🎯 Using manual tier: ${tierId}`);
-        }
-
-        // 6. Obtener tarifas de los tiers (DOM y SDD)
-        // Si no hay tier asignado (ni manual ni auto), usar default
-        if (!tierId) {
-            console.warn("⚠️ Could not determine any tier, using default rates");
-            return res.json(getDefaultRates(rate));
-        }
-
-        const [domTierRows] = await db.execute(
-            "SELECT * FROM rateTiers WHERE id = ? AND serviceType = 'DOM' AND isActive = 1",
-            [tierId]
-        );
-
-        const [sddTierRows] = await db.execute(
-            "SELECT * FROM rateTiers WHERE serviceType = 'SDD' AND isActive = 1 ORDER BY minVolume ASC LIMIT 1"
-        );
-
-        if (domTierRows.length === 0) {
-            console.warn(`⚠️ DOM tier not found for ${tierId}, using default rates`);
-            return res.json(getDefaultRates(rate));
-        }
-
-        const domTier = domTierRows[0];
-        const sddTier = sddTierRows[0] || domTier; // Fallback a DOM si no hay SDD
-
-        // 7. Calcular peso total
+        // 5. Calcular peso total
         const items = rate.items || [];
         const totalWeightGrams = items.reduce((sum, item) => sum + (item.grams || 0) * (item.quantity || 1), 0);
         const totalWeightKg = Math.ceil(totalWeightGrams / 1000) || 1; // Redondear hacia arriba, mínimo 1kg
 
-        // 8. Calcular precios según tier
-        const domPrice = calculateTierPrice(domTier, totalWeightKg);
-        const sddPrice = calculateTierPrice(sddTier, totalWeightKg);
+        console.log(`📦 Calculating rates for client ${clientId}, weight: ${totalWeightKg}kg`);
 
-        console.log(`💵 Calculated rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED (Weight: ${totalWeightKg}kg)`);
+        let domPrice, sddPrice;
 
-        // 9. Respuesta formato Shopify
-        // Convertir a centavos (Shopify espera el precio en la unidad menor de la moneda, pero como string)
-        // OJO: Shopify espera el precio en la moneda de la tienda. Asumimos que la tienda está en AED o USD.
-        // Si la tienda está en USD, habría que convertir. Por ahora enviamos el valor numérico tal cual.
+        // 6. PRIORIDAD: Usar tarifas personalizadas del cliente si las tiene
+        if (client.customDomBaseRate && client.customDomPerKg) {
+            const baseRate = parseFloat(client.customDomBaseRate);
+            const perKgRate = parseFloat(client.customDomPerKg);
+            // Fórmula: baseRate cubre el primer kg, luego +perKgRate por cada kg adicional
+            domPrice = baseRate + (Math.max(0, totalWeightKg - 1) * perKgRate);
+            console.log(`💰 DOM using custom rates: ${baseRate} + (${totalWeightKg - 1} * ${perKgRate}) = ${domPrice}`);
+        } else {
+            // Fallback a rate tiers si no tiene tarifas personalizadas
+            domPrice = await calculateFromTiers(db, client.manualRateTierId, clientId, 'DOM', totalWeightKg);
+        }
 
+        if (client.customSddBaseRate && client.customSddPerKg) {
+            const baseRate = parseFloat(client.customSddBaseRate);
+            const perKgRate = parseFloat(client.customSddPerKg);
+            sddPrice = baseRate + (Math.max(0, totalWeightKg - 1) * perKgRate);
+            console.log(`💰 SDD using custom rates: ${baseRate} + (${totalWeightKg - 1} * ${perKgRate}) = ${sddPrice}`);
+        } else {
+            // Fallback a rate tiers
+            sddPrice = await calculateFromTiers(db, client.manualRateTierId, clientId, 'SDD', totalWeightKg);
+        }
+
+        // Usar defaults si no se pudieron calcular
+        if (!domPrice) domPrice = 15 + (Math.max(0, totalWeightKg - 1) * 2);
+        if (!sddPrice) sddPrice = 25 + (Math.max(0, totalWeightKg - 1) * 3);
+
+        console.log(`💵 Final rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED`);
+
+        // 7. Respuesta formato Shopify
         const response = {
             rates: [
                 {
                     service_name: "PathXpress Standard",
                     service_code: "DOM",
-                    total_price: (domPrice * 100).toString(), // En centavos
+                    total_price: Math.round(domPrice * 100).toString(), // En centavos
                     currency: "AED",
                     min_delivery_date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
                     max_delivery_date: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
@@ -1081,7 +1160,7 @@ app.post("/api/shipping-rates", async (req, res) => {
                 {
                     service_name: "PathXpress Same Day",
                     service_code: "SAMEDAY",
-                    total_price: (sddPrice * 100).toString(), // En centavos
+                    total_price: Math.round(sddPrice * 100).toString(), // En centavos
                     currency: "AED",
                     min_delivery_date: new Date().toISOString(),
                     max_delivery_date: new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString()
@@ -1095,6 +1174,62 @@ app.post("/api/shipping-rates", async (req, res) => {
         res.json(getDefaultRates(req.body.rate));
     }
 });
+
+// Helper: Calcular precio desde rateTiers (fallback)
+async function calculateFromTiers(db, manualTierId, clientId, serviceType, weightKg) {
+    try {
+        let tierId = manualTierId;
+
+        // Si no tiene tier manual, calcular por volumen
+        if (!tierId) {
+            const [volumeRows] = await db.execute(`
+                SELECT COUNT(*) as shipmentCount 
+                FROM orders 
+                WHERE clientId = ? 
+                AND createdAt >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+            `, [clientId]);
+
+            const monthlyVolume = volumeRows[0]?.shipmentCount || 0;
+
+            const [tierRows] = await db.execute(`
+                SELECT id FROM rateTiers 
+                WHERE serviceType = ? 
+                AND minVolume <= ? 
+                AND (maxVolume IS NULL OR maxVolume >= ?)
+                AND isActive = 1
+                ORDER BY minVolume DESC 
+                LIMIT 1
+            `, [serviceType, monthlyVolume, monthlyVolume]);
+
+            if (tierRows.length > 0) {
+                tierId = tierRows[0].id;
+            }
+        }
+
+        if (!tierId) return null;
+
+        const [tierData] = await db.execute(
+            "SELECT baseRate, maxWeight, additionalKgRate FROM rateTiers WHERE id = ? AND isActive = 1",
+            [tierId]
+        );
+
+        if (tierData.length === 0) return null;
+
+        const tier = tierData[0];
+        const baseRate = parseFloat(tier.baseRate);
+        const maxWeight = tier.maxWeight || 5;
+        const additionalKgRate = parseFloat(tier.additionalKgRate);
+
+        if (weightKg <= maxWeight) {
+            return baseRate;
+        } else {
+            return baseRate + ((weightKg - maxWeight) * additionalKgRate);
+        }
+    } catch (err) {
+        console.error("Error calculating from tiers:", err);
+        return null;
+    }
+}
 
 // Helper: Calcular precio según tier
 function calculateTierPrice(tier, weightKg) {
