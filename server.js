@@ -519,15 +519,18 @@ app.get("/app", async (req, res) => {
     let currentClientId = "";
     let currentAutoSync = true;
     let currentSyncTag = "";
+    let currentServiceType = "DOM"; // Default service type
     let shipmentsRows = "<tr><td colspan='5'>No recent shipments.</td></tr>";
     let metrics = { todayCount: 0, activeCount: 0, pendingCod: 0 };
+    let shopData = null;
 
     if (isConnected) {
         // 1. Obtener datos de la tienda (Client ID)
-        const shopData = await getShopFromDB(shop);
+        shopData = await getShopFromDB(shop);
         if (shopData) {
             currentClientId = shopData.pathxpress_client_id;
             currentAutoSync = shopData.auto_sync !== 0; // MySQL boolean is 0/1
+            currentServiceType = shopData.default_service_type || "DOM";
             currentSyncTag = shopData.sync_tag || "";
         }
 
@@ -799,41 +802,15 @@ app.get("/app", async (req, res) => {
                         <p style="font-size:12px; color:#666;">If you enter a tag (e.g., "send_pathxpress"), ONLY orders with that tag in Shopify will be synced.</p>
                     </div>
 
-                    <h3 style="margin-top:20px; font-size:16px;">🚚 Shipping Service Mapping</h3>
-                    <p style="font-size:13px; color:#666;">Enter the exact shipping method name in Shopify and the service code in PathXpress (e.g., DOM, SAMEDAY).</p>
+                    <h3 style="margin-top:20px; font-size:16px;">🚚 Default Shipping Service</h3>
+                    <p style="font-size:13px; color:#666;">Select the default PathXpress service type for all orders from this store.</p>
                     
-                    <div id="mapping-container">
-                        ${(() => {
-                let mappingHtml = '';
-                let mapping = {};
-                try {
-                    if (shopData && shopData.service_mapping) {
-                        mapping = typeof shopData.service_mapping === 'string'
-                            ? JSON.parse(shopData.service_mapping)
-                            : shopData.service_mapping;
-                    }
-                } catch (e) { }
-
-                const keys = Object.keys(mapping);
-                if (keys.length > 0) {
-                    keys.forEach(key => {
-                        mappingHtml += `
-                                    <div style="display:flex; gap:10px; margin-bottom:10px;">
-                                        <input type="text" name="shopify_service[]" value="${key}" placeholder="Shopify: Standard Shipping" style="flex:1; margin-bottom:0;" />
-                                        <input type="text" name="pathxpress_service[]" value="${mapping[key]}" placeholder="PathXpress: DOM" style="width:120px; margin-bottom:0;" />
-                                    </div>`;
-                    });
-                }
-
-                // Siempre agregar una fila vacía extra al final para nuevos mapeos
-                mappingHtml += `
-                                <div style="display:flex; gap:10px; margin-bottom:10px;">
-                                    <input type="text" name="shopify_service[]" placeholder="Shopify: Standard Shipping" style="flex:1; margin-bottom:0;" />
-                                    <input type="text" name="pathxpress_service[]" placeholder="PathXpress: DOM" style="width:120px; margin-bottom:0;" />
-                                </div>`;
-
-                return mappingHtml;
-            })()}
+                    <div style="margin-bottom:15px;">
+                        <select name="default_service_type" id="default_service_type" style="width:100%; padding:10px; border:1px solid #c4cdd5; border-radius:3px; font-size:14px;">
+                            <option value="DOM" ${currentServiceType === 'DOM' ? 'selected' : ''}>🏠 DOM - Domestic Standard (1-2 days)</option>
+                            <option value="SAMEDAY" ${currentServiceType === 'SAMEDAY' ? 'selected' : ''}>⚡ SAMEDAY - Same Day Express</option>
+                            <option value="NEXTDAY" ${currentServiceType === 'NEXTDAY' ? 'selected' : ''}>📦 NEXTDAY - Next Day Delivery</option>
+                        </select>
                     </div>
 
                     <button type="submit">Save Settings</button>
@@ -875,36 +852,33 @@ app.get("/app", async (req, res) => {
 // 4.1) GUARDAR CONFIGURACIÓN
 // ======================
 app.post("/app/save-settings", express.urlencoded({ extended: true }), async (req, res) => {
-    const { shop, clientId, shopify_service, pathxpress_service, auto_sync, sync_tag } = req.body;
+    const { shop, clientId, default_service_type, auto_sync, sync_tag } = req.body;
 
     if (!shop || !clientId) {
-        return res.send("Error: Missing data.");
-    }
-
-    // Procesar mapeo de servicios
-    const serviceMapping = {};
-    if (Array.isArray(shopify_service) && Array.isArray(pathxpress_service)) {
-        for (let i = 0; i < shopify_service.length; i++) {
-            const sName = shopify_service[i].trim();
-            const pCode = pathxpress_service[i].trim();
-            if (sName && pCode) {
-                serviceMapping[sName] = pCode;
-            }
-        }
+        return res.send("Error: Missing data. Please provide a Client ID.");
     }
 
     const isAutoSync = auto_sync === "1" ? 1 : 0;
+    const serviceType = default_service_type || "DOM";
 
     try {
+        // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            "UPDATE shopify_shops SET pathxpress_client_id = ?, service_mapping = ?, auto_sync = ?, sync_tag = ? WHERE shop_domain = ?",
-            [clientId, JSON.stringify(serviceMapping), isAutoSync, sync_tag || null, shop]
+            `INSERT INTO shopify_shops (shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                pathxpress_client_id = VALUES(pathxpress_client_id),
+                default_service_type = VALUES(default_service_type),
+                auto_sync = VALUES(auto_sync),
+                sync_tag = VALUES(sync_tag),
+                updated_at = CURRENT_TIMESTAMP`,
+            [shop, clientId, serviceType, isAutoSync, sync_tag || null]
         );
-        console.log(`⚙️ Settings updated for ${shop}: ClientID = ${clientId}, AutoSync = ${isAutoSync}, Tag = ${sync_tag} `);
+        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync}, Tag = ${sync_tag}`);
         res.redirect(`/app?shop=${shop}`);
     } catch (err) {
         console.error("Error saving settings:", err);
-        res.send("Error saving settings.");
+        res.send("Error saving settings. Please try again.");
     }
 });
 
@@ -1656,24 +1630,8 @@ function orderToShipment(order, shop, shopData) {
         console.warn(`⚠️ Shop ${shop} does NOT have pathxpress_client_id configured. Using default: 1`);
     }
 
-    // Determinar Service Type
-    // Buscamos en shipping_lines el título del servicio
-    const shippingLines = order.shipping_lines || [];
-    const shippingTitle = shippingLines.length > 0 ? shippingLines[0].title : "";
-
-    let serviceType = "DOM"; // Default
-    if (shopData?.service_mapping && shippingTitle) {
-        // service_mapping puede venir como objeto o string JSON si la librería mysql2 no lo parsea auto
-        let mapping = shopData.service_mapping;
-        if (typeof mapping === 'string') {
-            try { mapping = JSON.parse(mapping); } catch (e) { }
-        }
-
-        if (mapping && mapping[shippingTitle]) {
-            serviceType = mapping[shippingTitle];
-            console.log(`🚚 Mapped service '${shippingTitle}' -> '${serviceType}'`);
-        }
-    }
+    // Determinar Service Type - Usar el tipo de servicio por defecto configurado
+    const serviceType = shopData?.default_service_type || "DOM";
 
     return {
         // info de integración

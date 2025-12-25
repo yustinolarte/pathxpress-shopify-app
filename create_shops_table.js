@@ -26,6 +26,10 @@ async function createShopsTable() {
                 province VARCHAR(100),
                 country VARCHAR(100),
                 zip VARCHAR(20),
+                pathxpress_client_id INT NULL,
+                default_service_type VARCHAR(20) DEFAULT 'DOM',
+                auto_sync TINYINT DEFAULT 1,
+                sync_tag VARCHAR(100) NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
