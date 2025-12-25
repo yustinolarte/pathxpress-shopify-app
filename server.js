@@ -344,7 +344,36 @@ const webhookMiddleware = [
     verifyShopifyWebhook
 ];
 
-// --- GDPR / Mandatory Webhooks ---
+// --- GDPR / Mandatory Webhooks (Unified Endpoint for shopify.app.toml) ---
+app.post("/webhooks/shopify", webhookMiddleware, (req, res) => {
+    const topic = req.headers["x-shopify-topic"];
+    const shop = req.headers["x-shopify-shop-domain"];
+
+    console.log(`🔒 GDPR Webhook received - Topic: ${topic}, Shop: ${shop}`);
+    console.log("Headers:", JSON.stringify(req.headers, null, 2));
+    console.log("Body:", req.body.toString());
+
+    switch (topic) {
+        case "customers/data_request":
+            console.log("📋 Processing Customer Data Request");
+            // Here you would collect and return customer data if you store any
+            break;
+        case "customers/redact":
+            console.log("🗑️ Processing Customer Redact Request");
+            // Here you would delete customer data if you store any
+            break;
+        case "shop/redact":
+            console.log("🏪 Processing Shop Redact Request");
+            // Here you would delete shop data after uninstall (48 hours later)
+            break;
+        default:
+            console.log(`⚠️ Unknown GDPR topic: ${topic}`);
+    }
+
+    res.status(200).send();
+});
+
+// --- GDPR / Mandatory Webhooks (Legacy individual endpoints) ---
 app.post("/webhooks/shopify/customers/data_request", webhookMiddleware, (req, res) => {
     console.log("🔒 GDPR: Customer Data Request received");
     console.log("Headers:", JSON.stringify(req.headers, null, 2));

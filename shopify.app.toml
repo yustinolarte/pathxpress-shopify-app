@@ -1,0 +1,25 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "05f6b617da114d97935279ad945c214e"
+name = "PATHXPRESS Portal"
+application_url = "https://terrible-gerta-pathxpress-ece73c11.koyeb.app/app"
+embedded = true
+
+[webhooks]
+api_version = "2025-10"
+
+  # Mandatory GDPR Compliance Webhooks
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "https://terrible-gerta-pathxpress-ece73c11.koyeb.app/webhooks/shopify"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_fulfillments,write_fulfillments,read_orders,write_orders,read_shipping,write_shipping"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://terrible-gerta-pathxpress-ece73c11.koyeb.app/auth/callback"
+]
