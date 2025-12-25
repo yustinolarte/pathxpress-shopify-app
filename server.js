@@ -785,7 +785,41 @@ app.get("/app", async (req, res) => {
                     <input type="hidden" name="shop" value="${shop}" />
                     
                     <label for="clientId">PathXpress Client ID:</label>
-                    <input type="number" id="clientId" name="clientId" placeholder="Ej: 123" required value="${currentClientId || ''}" />
+                    <div style="display:flex; gap:10px; align-items:center;">
+                        <input type="number" id="clientId" name="clientId" placeholder="Enter your Client ID" required value="${currentClientId || ''}" style="flex:1; margin-bottom:0;" onchange="validateClientId(this.value)" />
+                        <button type="button" onclick="validateClientId(document.getElementById('clientId').value)" style="background:#5c6ac4; padding:10px 15px;">Verify</button>
+                    </div>
+                    <div id="clientFeedback" style="margin-top:8px; padding:8px; border-radius:4px; display:none;"></div>
+                    <script>
+                        async function validateClientId(id) {
+                            if (!id) return;
+                            const feedback = document.getElementById('clientFeedback');
+                            feedback.style.display = 'block';
+                            feedback.style.background = '#f4f6f8';
+                            feedback.innerHTML = '🔍 Verifying...';
+                            try {
+                                const res = await fetch('/api/validate-client/' + id);
+                                const data = await res.json();
+                                if (data.found) {
+                                    feedback.style.background = '#d4edda';
+                                    feedback.style.color = '#155724';
+                                    feedback.innerHTML = '✅ <strong>' + data.companyName + '</strong> (Contact: ' + (data.contactName || 'N/A') + ')';
+                                } else {
+                                    feedback.style.background = '#f8d7da';
+                                    feedback.style.color = '#721c24';
+                                    feedback.innerHTML = '❌ Client ID not found. Please check and try again.';
+                                }
+                            } catch (e) {
+                                feedback.style.background = '#fff3cd';
+                                feedback.style.color = '#856404';
+                                feedback.innerHTML = '⚠️ Could not verify. Will save anyway.';
+                            }
+                        }
+                        // Auto-validate if there's a value on load
+                        if (document.getElementById('clientId').value) {
+                            validateClientId(document.getElementById('clientId').value);
+                        }
+                    </script>
 
                     <h3 style="margin-top:20px; font-size:16px;">🔍 Sync Filters</h3>
                     <div style="margin-bottom:15px; padding:10px; background:#f4f6f8; border-radius:4px;">
@@ -846,6 +880,36 @@ app.get("/app", async (req, res) => {
       </body >
     </html >
                     `);
+});
+
+// ======================
+// 4.0.1) API: Validate Client ID
+// ======================
+app.get("/api/validate-client/:id", async (req, res) => {
+    const clientId = req.params.id;
+
+    try {
+        // Query the clients table from PathXpress portal database
+        const [rows] = await db.execute(
+            "SELECT id, companyName, contactName, email FROM clients WHERE id = ?",
+            [clientId]
+        );
+
+        if (rows.length > 0) {
+            res.json({
+                found: true,
+                companyName: rows[0].companyName || 'Unknown Company',
+                contactName: rows[0].contactName || null,
+                email: rows[0].email || null
+            });
+        } else {
+            res.json({ found: false });
+        }
+    } catch (err) {
+        console.error("Error validating client:", err);
+        // If table doesn't exist or other error, return not found
+        res.json({ found: false, error: 'Could not validate' });
+    }
 });
 
 // ======================
