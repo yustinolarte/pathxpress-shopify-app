@@ -889,9 +889,9 @@ app.get("/api/validate-client/:id", async (req, res) => {
     const clientId = req.params.id;
 
     try {
-        // Query the clients table from PathXpress portal database
+        // Query the clientAccounts table from PathXpress portal database
         const [rows] = await db.execute(
-            "SELECT id, companyName, contactName, email FROM clients WHERE id = ?",
+            "SELECT id, companyName, contactName, billingEmail FROM clientAccounts WHERE id = ?",
             [clientId]
         );
 
@@ -900,7 +900,7 @@ app.get("/api/validate-client/:id", async (req, res) => {
                 found: true,
                 companyName: rows[0].companyName || 'Unknown Company',
                 contactName: rows[0].contactName || null,
-                email: rows[0].email || null
+                email: rows[0].billingEmail || null
             });
         } else {
             res.json({ found: false });
