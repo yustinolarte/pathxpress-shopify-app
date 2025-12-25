@@ -641,197 +641,115 @@ app.get("/app", async (req, res) => {
         <script>
             function generateWaybillPDF(shipment) {
                 const { jsPDF } = window.jspdf;
-                // Formato A6 (105mm x 148mm) - tamaño estándar de etiqueta de envío
-                const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [105, 148] });
-                
-                const pageWidth = 105;
-                const margin = 5;
-                
-                // ===== HEADER =====
-                // Borde superior azul
-                pdf.setDrawColor(30, 64, 175);
-                pdf.setLineWidth(2);
-                pdf.line(0, 2, pageWidth, 2);
-                
-                // Logo PATHXPRESS
-                pdf.setFontSize(14);
-                pdf.setFont('helvetica', 'bold');
-                pdf.setTextColor(0, 0, 0);
-                pdf.text('PATH', margin, 10);
-                pdf.setTextColor(220, 38, 38); // Rojo para la X
-                pdf.text('X', margin + 16, 10);
-                pdf.setTextColor(0, 0, 0);
-                pdf.text('PRESS', margin + 20, 10);
-                
-                // Fecha y Waybill Number (derecha)
-                pdf.setFontSize(8);
-                pdf.setFont('helvetica', 'normal');
-                const today = new Date().toLocaleDateString('en-GB');
-                pdf.text(today, pageWidth - margin, 7, { align: 'right' });
-                pdf.setFont('helvetica', 'bold');
-                pdf.setFontSize(9);
-                pdf.text(shipment.waybillNumber || 'PX202500000', pageWidth - margin, 12, { align: 'right' });
-                
-                // Línea separadora
-                pdf.setDrawColor(200, 200, 200);
-                pdf.setLineWidth(0.3);
-                pdf.line(margin, 15, pageWidth - margin, 15);
-                
-                // ===== FROM SECTION =====
-                let y = 20;
-                pdf.setFontSize(7);
-                pdf.setFont('helvetica', 'bold');
-                pdf.setTextColor(100, 100, 100);
-                pdf.text('FROM:', margin, y);
-                pdf.setTextColor(0, 0, 0);
-                pdf.setFontSize(9);
-                pdf.text(shipment.shipperName || 'Sender', margin + 12, y);
-                y += 4;
-                pdf.setFontSize(7);
-                pdf.setFont('helvetica', 'normal');
-                pdf.setTextColor(100, 100, 100);
-                pdf.text(shipment.shipperCity || 'Dubai', margin + 12, y);
-                
-                // ===== TO SECTION =====
-                y += 8;
-                pdf.setFontSize(7);
-                pdf.setFont('helvetica', 'bold');
-                pdf.setTextColor(100, 100, 100);
-                pdf.text('TO:', margin, y);
-                pdf.setTextColor(0, 0, 0);
-                pdf.setFontSize(10);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text(shipment.customerName || 'Customer', margin + 12, y);
-                y += 5;
-                pdf.setFontSize(8);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text(shipment.customerPhone || '', margin + 12, y);
-                y += 4;
-                pdf.setFontSize(7);
-                const address = shipment.address || '';
-                const addressLines = pdf.splitTextToSize(address, 50);
-                pdf.text(addressLines, margin + 12, y);
-                y += addressLines.length * 3 + 2;
-                pdf.setFont('helvetica', 'bold');
-                pdf.text((shipment.city || 'Dubai') + ', United Arab Emirates', margin + 12, y);
-                
-                // ===== CITY CODE BOX =====
-                const boxX = 70;
-                const boxY = 28;
-                pdf.setFillColor(30, 64, 175);
-                pdf.roundedRect(boxX, boxY, 20, 18, 2, 2, 'F');
+                const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+                pdf.setFillColor('#1e40af');
+                pdf.rect(0, 0, 210, 40, 'F');
                 pdf.setTextColor(255, 255, 255);
-                pdf.setFontSize(14);
+                pdf.setFontSize(24);
                 pdf.setFont('helvetica', 'bold');
-                // Mapeo de ciudad a código
-                const cityCode = getCityCode(shipment.city || shipment.emirate || 'Dubai');
-                pdf.text(cityCode, boxX + 10, boxY + 8, { align: 'center' });
-                pdf.setFontSize(8);
-                pdf.text(shipment.serviceType || 'DOM', boxX + 10, boxY + 14, { align: 'center' });
-                
-                // ===== QR CODE =====
-                // Crear QR con datos del envío
+                pdf.text('PATHXPRESS', 15, 20);
+                pdf.setFontSize(10);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text('Reliable Delivery Services in the UAE', 15, 28);
+                pdf.setFontSize(16);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('Waybill: ' + shipment.waybillNumber, 15, 36);
+
+                const canvas = document.createElement('canvas');
                 try {
-                    const qrData = JSON.stringify({
-                        wb: shipment.waybillNumber,
-                        to: shipment.customerName,
-                        city: shipment.city
-                    });
-                    // Usamos un placeholder ya que QRCode requiere librería adicional
-                    pdf.setFillColor(240, 240, 240);
-                    pdf.rect(boxX + 22, boxY, 18, 18, 'F');
-                    pdf.setFontSize(5);
-                    pdf.setTextColor(150, 150, 150);
-                    pdf.text('QR', boxX + 31, boxY + 10, { align: 'center' });
+                    JsBarcode(canvas, shipment.waybillNumber, { format: 'CODE128', width: 2, height: 60, displayValue: false });
+                    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 140, 10, 60, 25);
                 } catch (e) { console.error(e); }
-                
-                // ===== DETAILS TABLE =====
-                y = 65;
-                pdf.setDrawColor(0, 0, 0);
-                pdf.setLineWidth(0.5);
-                
-                // Headers
-                const cols = [margin, 30, 50, 70];
-                const colWidth = 23;
-                
-                pdf.setFillColor(245, 245, 245);
-                pdf.rect(margin, y, pageWidth - margin * 2, 6, 'F');
-                pdf.setFontSize(6);
+
+                pdf.setFillColor('#dc2626');
+                pdf.roundedRect(140, 36, 60, 8, 2, 2, 'F');
+                pdf.setTextColor(255, 255, 255);
+                pdf.setFontSize(10);
+                pdf.text(shipment.serviceType === 'SAMEDAY' ? 'EXPRESS' : 'STANDARD', 170, 41, { align: 'center' });
+
+                pdf.setTextColor('#1f2937');
+                let yPos = 55;
+                pdf.setFillColor('#f3f4f6');
+                pdf.rect(10, yPos, 90, 8, 'F');
+                pdf.setFontSize(12);
                 pdf.setFont('helvetica', 'bold');
-                pdf.setTextColor(100, 100, 100);
-                pdf.text('PCS', cols[0] + 10, y + 4, { align: 'center' });
-                pdf.text('KG', cols[1] + 8, y + 4, { align: 'center' });
-                pdf.text('SERVICE', cols[2] + 8, y + 4, { align: 'center' });
-                pdf.text('STATUS', cols[3] + 12, y + 4, { align: 'center' });
-                
-                // Values
-                y += 6;
-                pdf.setFillColor(255, 255, 255);
-                pdf.rect(margin, y, pageWidth - margin * 2, 8, 'FD');
+                pdf.text('SHIPPER INFORMATION', 15, yPos + 5.5);
+                yPos += 12;
+                pdf.setFontSize(10);
+                pdf.text(shipment.shipperName || '', 15, yPos);
+                yPos += 5;
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(shipment.shipperAddress || '', 15, yPos);
+                yPos += 5;
+                pdf.text((shipment.shipperCity || '') + ', ' + (shipment.shipperCountry || ''), 15, yPos);
+                yPos += 5;
+                pdf.text('Phone: ' + (shipment.shipperPhone || ''), 15, yPos);
+
+                yPos = 55;
+                pdf.setFillColor('#f3f4f6');
+                pdf.rect(110, yPos, 90, 8, 'F');
+                pdf.setFontSize(12);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('CONSIGNEE INFORMATION', 115, yPos + 5.5);
+                yPos += 12;
+                pdf.setFontSize(10);
+                pdf.text(shipment.customerName || '', 115, yPos);
+                yPos += 5;
+                pdf.setFont('helvetica', 'normal');
+                pdf.text(shipment.address || '', 115, yPos);
+                yPos += 5;
+                pdf.text((shipment.city || '') + ', ' + (shipment.destinationCountry || ''), 115, yPos);
+                yPos += 5;
+                pdf.text('Phone: ' + (shipment.customerPhone || ''), 115, yPos);
+
+                if (shipment.codRequired && shipment.codAmount) {
+                    yPos = 100;
+                    pdf.setFillColor(255, 165, 0);
+                    pdf.rect(10, yPos, 190, 15, 'F');
+                    pdf.setTextColor(255, 255, 255);
+                    pdf.setFontSize(14);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.text('CASH ON DELIVERY (COD)', 15, yPos + 6);
+                    pdf.setFontSize(12);
+                    pdf.text('COLLECT: ' + shipment.codAmount + ' ' + (shipment.codCurrency || 'AED'), 15, yPos + 12);
+                    pdf.setTextColor('#1f2937');
+                    yPos += 20;
+                } else {
+                    yPos = 100;
+                }
+
+                pdf.setFillColor('#f3f4f6');
+                pdf.rect(10, yPos, 190, 8, 'F');
+                pdf.setFontSize(12);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('SHIPMENT DETAILS', 15, yPos + 5.5);
+                yPos += 15;
                 pdf.setFontSize(10);
                 pdf.setFont('helvetica', 'bold');
-                pdf.setTextColor(0, 0, 0);
-                pdf.text((shipment.pieces || 1).toString(), cols[0] + 10, y + 5.5, { align: 'center' });
-                pdf.text((shipment.weight || 0.5).toFixed(1), cols[1] + 8, y + 5.5, { align: 'center' });
-                pdf.text(shipment.serviceType || 'DOM', cols[2] + 8, y + 5.5, { align: 'center' });
-                const status = shipment.codRequired ? 'COD' : 'PREPAID';
-                pdf.text(status, cols[3] + 12, y + 5.5, { align: 'center' });
-                
-                // Líneas verticales de la tabla
-                pdf.setLineWidth(0.2);
-                pdf.line(cols[1], y - 6, cols[1], y + 8);
-                pdf.line(cols[2], y - 6, cols[2], y + 8);
-                pdf.line(cols[3], y - 6, cols[3], y + 8);
-                
-                // ===== BARCODE =====
-                y = 90;
-                try {
-                    const barcodeCanvas = document.createElement('canvas');
-                    JsBarcode(barcodeCanvas, shipment.waybillNumber || 'PX202500000', { 
-                        format: 'CODE128', 
-                        width: 2, 
-                        height: 50, 
-                        displayValue: true,
-                        fontSize: 12,
-                        margin: 5,
-                        background: '#ffffff'
-                    });
-                    pdf.addImage(barcodeCanvas.toDataURL('image/png'), 'PNG', margin + 5, y, pageWidth - margin * 2 - 10, 35);
-                } catch (e) { console.error(e); }
-                
-                // ===== FOOTER =====
-                pdf.setFontSize(6);
-                pdf.setTextColor(30, 64, 175);
+                pdf.text('Pieces:', 15, yPos);
                 pdf.setFont('helvetica', 'normal');
-                pdf.text('pathxpress.net | +971 522803433', pageWidth / 2, 142, { align: 'center' });
-                
-                // Borde inferior azul
-                pdf.setDrawColor(30, 64, 175);
-                pdf.setLineWidth(2);
-                pdf.line(0, 146, pageWidth, 146);
-                
-                // Download PDF
-                pdf.save('waybill-' + (shipment.waybillNumber || 'label') + '.pdf');
-            }
-            
-            // Helper para obtener código de ciudad
-            function getCityCode(city) {
-                const codes = {
-                    'Dubai': 'DXB',
-                    'Abu Dhabi': 'AUH',
-                    'Sharjah': 'SHJ',
-                    'Ajman': 'AJM',
-                    'Ras Al Khaimah': 'RAK',
-                    'Fujairah': 'FUJ',
-                    'Umm Al Quwain': 'UAQ',
-                    'Al Ain': 'AAN'
-                };
-                for (const [name, code] of Object.entries(codes)) {
-                    if (city && city.toLowerCase().includes(name.toLowerCase())) {
-                        return code;
-                    }
-                }
-                return 'UAE';
+                pdf.text((shipment.pieces || 1).toString(), 35, yPos);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('Weight:', 75, yPos);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text((shipment.weight || 0) + ' kg', 95, yPos);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('Status:', 135, yPos);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text((shipment.status || '').replace(/_/g, ' ').toUpperCase(), 155, yPos);
+
+                yPos = 150;
+                try {
+                    const canvas2 = document.createElement('canvas');
+                    JsBarcode(canvas2, shipment.waybillNumber, { format: 'CODE128', width: 3, height: 80, displayValue: true, fontSize: 14 });
+                    pdf.addImage(canvas2.toDataURL('image/png'), 'PNG', 40, yPos, 130, 40);
+                } catch (e) { console.error(e); }
+
+                pdf.setFontSize(8);
+                pdf.setTextColor(128, 128, 128);
+                pdf.text('PATHXPRESS FZCO | Dubai, UAE | info@pathxpress.ae', 105, 270, { align: 'center' });
+                pdf.save('waybill-' + shipment.waybillNumber + '.pdf');
             }
         </script>
       </head>
