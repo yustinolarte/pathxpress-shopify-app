@@ -810,7 +810,14 @@ app.get("/app", async (req, res) => {
                 pdf.setLineWidth(2);
                 pdf.line(0, 146, pageWidth, 146);
                 
-                pdf.save('waybill-' + (shipment.waybillNumber || 'label') + '.pdf');
+                // Abrir en nueva ventana (evita restricciones del iframe de Shopify)
+                const pdfBlob = pdf.output('blob');
+                const pdfUrl = URL.createObjectURL(pdfBlob);
+                const newWindow = window.open(pdfUrl, '_blank');
+                if (!newWindow) {
+                    // Si el popup está bloqueado, intentar descarga directa
+                    pdf.save('waybill-' + (shipment.waybillNumber || 'label') + '.pdf');
+                }
             }
             
             // Helper para obtener código de ciudad
@@ -1122,9 +1129,9 @@ app.post("/api/shipping-rates", async (req, res) => {
         if (client.customDomBaseRate && client.customDomPerKg) {
             const baseRate = parseFloat(client.customDomBaseRate);
             const perKgRate = parseFloat(client.customDomPerKg);
-            // Fórmula: baseRate cubre el primer kg, luego +perKgRate por cada kg adicional
-            domPrice = baseRate + (Math.max(0, totalWeightKg - 1) * perKgRate);
-            console.log(`💰 DOM using custom rates: ${baseRate} + (${totalWeightKg - 1} * ${perKgRate}) = ${domPrice}`);
+            // Fórmula: baseRate cubre hasta 5kg, luego +perKgRate por cada kg adicional
+            domPrice = baseRate + (Math.max(0, totalWeightKg - 5) * perKgRate);
+            console.log(`💰 DOM using custom rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${domPrice}`);
         } else {
             // Fallback a rate tiers si no tiene tarifas personalizadas
             domPrice = await calculateFromTiers(db, client.manualRateTierId, clientId, 'DOM', totalWeightKg);
@@ -1133,16 +1140,16 @@ app.post("/api/shipping-rates", async (req, res) => {
         if (client.customSddBaseRate && client.customSddPerKg) {
             const baseRate = parseFloat(client.customSddBaseRate);
             const perKgRate = parseFloat(client.customSddPerKg);
-            sddPrice = baseRate + (Math.max(0, totalWeightKg - 1) * perKgRate);
-            console.log(`💰 SDD using custom rates: ${baseRate} + (${totalWeightKg - 1} * ${perKgRate}) = ${sddPrice}`);
+            sddPrice = baseRate + (Math.max(0, totalWeightKg - 5) * perKgRate);
+            console.log(`💰 SDD using custom rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${sddPrice}`);
         } else {
             // Fallback a rate tiers
             sddPrice = await calculateFromTiers(db, client.manualRateTierId, clientId, 'SDD', totalWeightKg);
         }
 
         // Usar defaults si no se pudieron calcular
-        if (!domPrice) domPrice = 15 + (Math.max(0, totalWeightKg - 1) * 2);
-        if (!sddPrice) sddPrice = 25 + (Math.max(0, totalWeightKg - 1) * 3);
+        if (!domPrice) domPrice = 15 + (Math.max(0, totalWeightKg - 5) * 2);
+        if (!sddPrice) sddPrice = 25 + (Math.max(0, totalWeightKg - 5) * 3);
 
         console.log(`💵 Final rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED`);
 
