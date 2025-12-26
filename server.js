@@ -932,7 +932,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             feedback.style.background = '#f4f6f8';
                             feedback.innerHTML = '🔍 Verifying...';
                             try {
-                                const res = await authenticatedFetch('/api/validate-client/' + id);
+                                const res = await fetch('/api/validate-client/' + id);
                                 const data = await res.json();
                                 if (data.found) {
                                     feedback.style.background = '#d4edda';
@@ -1040,7 +1040,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
 // ======================
 // 4.0.1) API: Validate Client ID
 // ======================
-app.get("/api/validate-client/:id", requireSessionToken, async (req, res) => {
+app.get("/api/validate-client/:id", async (req, res) => {
     const clientId = req.params.id;
 
     try {
