@@ -663,19 +663,19 @@ app.get("/app", requireSessionToken, async (req, res) => {
                     }).replace(/"/g, '&quot;');
 
                     return `
-                    <tr style="border-bottom:1px solid #eee;">
-                        <td style="padding:10px;">${row.shop_order_name}</td>
-                        <td style="padding:10px;"><b>${row.waybillNumber || '---'}</b></td>
-                        <td style="padding:10px;">
-                            <span style="background:#e4e5e7; padding:2px 6px; border-radius:4px; font-size:12px;">
+                    <tr>
+                        <td><strong style="color: var(--text-primary);">${row.shop_order_name}</strong></td>
+                        <td><span style="color: var(--blue-electric); font-weight: 600;">${row.waybillNumber || '---'}</span></td>
+                        <td>
+                            <span class="badge badge-status">
                                 ${row.status}
                             </span>
                         </td>
-                        <td style="padding:10px; color:#666;">${new Date(row.createdAt).toLocaleDateString()}</td>
-                        <td style="padding:10px;">
+                        <td>${new Date(row.createdAt).toLocaleDateString()}</td>
+                        <td>
                             ${row.waybillNumber
-                            ? `<button onclick='generateWaybillPDF(${shipmentData})' style="background:none; border:none; cursor:pointer; color:#008060; font-weight:bold; text-decoration:underline;">🖨️ Print Label</button>`
-                            : '<span style="color:#999;">Pending</span>'
+                            ? `<button class="print-btn" onclick='generateWaybillPDF(${shipmentData})'>🖨️ Print Label</button>`
+                            : '<span style="color: var(--text-muted);">Pending</span>'
                         }
                         </td>
                     </tr>
@@ -690,142 +690,683 @@ app.get("/app", requireSessionToken, async (req, res) => {
     <html>
       <head>
         <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>PATHXPRESS Portal</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
         <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 25px; color: #333; }
-            .card { background: white; border: 1px solid #dfe3e8; border-radius: 4px; padding: 20px; margin-bottom: 20px; box-shadow: 0 0 0 1px rgba(63, 63, 68, 0.05), 0 1px 3px 0 rgba(63, 63, 68, 0.15); }
-            h1 { font-size: 24px; margin-bottom: 10px; }
-            h2 { font-size: 18px; margin-bottom: 10px; }
-            label { display: block; margin-bottom: 5px; font-weight: 600; }
-            input[type="text"], input[type="number"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #c4cdd5; border-radius: 3px; box-sizing: border-box; }
-            button { background: #008060; color: white; border: none; padding: 10px 20px; border-radius: 3px; cursor: pointer; font-weight: bold; }
-            button:hover { background: #006e52; }
-            .metric-card { flex: 1; background: #f9fafb; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e5e7eb; }
-            .metric-val { font-size: 24px; font-weight: bold; color: #111827; margin-top: 5px; }
-            .metric-label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; }
+            :root {
+                --bg-primary: #0A1128;
+                --bg-card: #0F1A3B;
+                --blue-electric: #2D6CF6;
+                --red-accent: #E10600;
+                --red-neon: #FF2E2E;
+                --text-primary: #FFFFFF;
+                --text-muted: #8A8F98;
+                --border-color: rgba(255, 255, 255, 0.1);
+            }
+            
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            
+            body { 
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+                padding: 25px; 
+                color: var(--text-primary);
+                background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-card) 100%);
+                min-height: 100vh;
+                -webkit-font-smoothing: antialiased;
+            }
+            
+            .card { 
+                background: rgba(15, 26, 59, 0.6);
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border: 1px solid var(--border-color);
+                border-radius: 16px; 
+                padding: 24px; 
+                margin-bottom: 20px; 
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                transition: transform 0.3s ease, box-shadow 0.3s ease;
+            }
+            
+            .card:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(45, 108, 246, 0.1);
+            }
+            
+            h1 { 
+                font-family: 'Poppins', sans-serif;
+                font-size: 28px; 
+                font-weight: 700;
+                margin-bottom: 10px; 
+                background: linear-gradient(135deg, var(--blue-electric), var(--red-neon));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+            }
+            
+            h2 { 
+                font-family: 'Poppins', sans-serif;
+                font-size: 18px; 
+                font-weight: 600;
+                margin-bottom: 15px;
+                color: var(--text-primary);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            
+            h3 {
+                font-family: 'Poppins', sans-serif;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            
+            p { color: var(--text-muted); line-height: 1.6; }
+            
+            label { 
+                display: block; 
+                margin-bottom: 8px; 
+                font-weight: 500; 
+                color: var(--text-primary);
+                font-size: 14px;
+            }
+            
+            input[type="text"], input[type="number"], select { 
+                width: 100%; 
+                padding: 12px 16px; 
+                margin-bottom: 15px; 
+                border: 1px solid var(--border-color); 
+                border-radius: 10px; 
+                background: rgba(255, 255, 255, 0.05);
+                color: var(--text-primary);
+                font-size: 14px;
+                transition: all 0.3s ease;
+            }
+            
+            input[type="text"]:focus, input[type="number"]:focus, select:focus { 
+                outline: none;
+                border-color: var(--blue-electric);
+                box-shadow: 0 0 0 3px rgba(45, 108, 246, 0.2);
+                background: rgba(255, 255, 255, 0.08);
+            }
+            
+            input::placeholder { color: var(--text-muted); }
+            
+            button { 
+                background: linear-gradient(135deg, var(--blue-electric), #1e5ad4);
+                color: white; 
+                border: none; 
+                padding: 12px 24px; 
+                border-radius: 10px; 
+                cursor: pointer; 
+                font-weight: 600;
+                font-size: 14px;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 15px rgba(45, 108, 246, 0.3);
+            }
+            
+            button:hover { 
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(45, 108, 246, 0.4);
+            }
+            
+            button:active {
+                transform: translateY(0);
+            }
+            
+            .btn-secondary {
+                background: linear-gradient(135deg, #5c6ac4, #4959bd);
+            }
+            
+            .btn-danger {
+                background: linear-gradient(135deg, var(--red-accent), #c20500);
+                box-shadow: 0 4px 15px rgba(225, 6, 0, 0.3);
+            }
+            
+            .btn-danger:hover {
+                box-shadow: 0 6px 20px rgba(225, 6, 0, 0.4);
+            }
+            
+            .metric-card { 
+                flex: 1; 
+                background: rgba(45, 108, 246, 0.1);
+                backdrop-filter: blur(10px);
+                padding: 20px; 
+                border-radius: 14px; 
+                text-align: center; 
+                border: 1px solid rgba(45, 108, 246, 0.2);
+                transition: all 0.3s ease;
+            }
+            
+            .metric-card:hover {
+                background: rgba(45, 108, 246, 0.15);
+                border-color: rgba(45, 108, 246, 0.3);
+                transform: translateY(-3px);
+            }
+            
+            .metric-val { 
+                font-family: 'Poppins', sans-serif;
+                font-size: 32px; 
+                font-weight: 700; 
+                color: var(--text-primary); 
+                margin-top: 8px;
+                background: linear-gradient(135deg, var(--text-primary), var(--blue-electric));
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+            }
+            
+            .metric-label { 
+                font-size: 11px; 
+                color: var(--text-muted); 
+                text-transform: uppercase; 
+                letter-spacing: 1px;
+                font-weight: 500;
+            }
+            
+            .status-connected {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                color: #22c55e;
+                font-weight: 600;
+                font-size: 14px;
+            }
+            
+            .status-connected::before {
+                content: '';
+                width: 10px;
+                height: 10px;
+                background: #22c55e;
+                border-radius: 50%;
+                box-shadow: 0 0 10px #22c55e;
+                animation: pulse 2s infinite;
+            }
+            
+            .status-disconnected {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                color: var(--red-neon);
+                font-weight: 600;
+                font-size: 14px;
+            }
+            
+            .status-disconnected::before {
+                content: '';
+                width: 10px;
+                height: 10px;
+                background: var(--red-neon);
+                border-radius: 50%;
+            }
+            
+            @keyframes pulse {
+                0%, 100% { opacity: 1; transform: scale(1); }
+                50% { opacity: 0.7; transform: scale(1.1); }
+            }
+            
+            table { 
+                width: 100%; 
+                border-collapse: separate;
+                border-spacing: 0;
+                font-size: 14px;
+            }
+            
+            thead tr {
+                background: rgba(45, 108, 246, 0.1);
+            }
+            
+            th {
+                padding: 14px 12px;
+                text-align: left;
+                font-weight: 600;
+                color: var(--text-primary);
+                border-bottom: 1px solid var(--border-color);
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            
+            td {
+                padding: 14px 12px;
+                border-bottom: 1px solid var(--border-color);
+                color: var(--text-muted);
+            }
+            
+            tbody tr {
+                transition: background 0.2s ease;
+            }
+            
+            tbody tr:hover {
+                background: rgba(45, 108, 246, 0.05);
+            }
+            
+            .badge {
+                display: inline-block;
+                padding: 4px 10px;
+                border-radius: 20px;
+                font-size: 11px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.3px;
+            }
+            
+            .badge-status {
+                background: rgba(45, 108, 246, 0.2);
+                color: var(--blue-electric);
+                border: 1px solid rgba(45, 108, 246, 0.3);
+            }
+            
+            .badge-success {
+                background: rgba(34, 197, 94, 0.2);
+                color: #22c55e;
+                border: 1px solid rgba(34, 197, 94, 0.3);
+            }
+            
+            .badge-warning {
+                background: rgba(245, 158, 11, 0.2);
+                color: #f59e0b;
+                border: 1px solid rgba(245, 158, 11, 0.3);
+            }
+            
+            .print-btn {
+                background: none;
+                border: none;
+                padding: 6px 12px;
+                color: var(--blue-electric);
+                font-weight: 600;
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                transition: all 0.2s ease;
+                box-shadow: none;
+            }
+            
+            .print-btn:hover {
+                color: var(--text-primary);
+                background: rgba(45, 108, 246, 0.1);
+                border-radius: 6px;
+                transform: none;
+                box-shadow: none;
+            }
+            
+            .settings-section {
+                background: rgba(255, 255, 255, 0.03);
+                border-radius: 12px;
+                padding: 16px;
+                margin-bottom: 16px;
+                border: 1px solid var(--border-color);
+            }
+            
+            .checkbox-wrapper {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            
+            input[type="checkbox"] {
+                width: 18px;
+                height: 18px;
+                accent-color: var(--blue-electric);
+                cursor: pointer;
+            }
+            
+            .helper-text {
+                font-size: 12px;
+                color: var(--text-muted);
+                margin-top: 4px;
+                margin-left: 28px;
+            }
+            
+            .feedback-box {
+                margin-top: 10px;
+                padding: 12px 16px;
+                border-radius: 10px;
+                font-size: 14px;
+            }
+            
+            .feedback-success {
+                background: rgba(34, 197, 94, 0.15);
+                border: 1px solid rgba(34, 197, 94, 0.3);
+                color: #22c55e;
+            }
+            
+            .feedback-error {
+                background: rgba(239, 68, 68, 0.15);
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                color: #ef4444;
+            }
+            
+            .feedback-warning {
+                background: rgba(245, 158, 11, 0.15);
+                border: 1px solid rgba(245, 158, 11, 0.3);
+                color: #f59e0b;
+            }
+            
+            .feedback-info {
+                background: rgba(45, 108, 246, 0.15);
+                border: 1px solid rgba(45, 108, 246, 0.3);
+                color: var(--blue-electric);
+            }
+            
+            .grid-2 {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+            }
+            
+            @media (max-width: 768px) {
+                .grid-2 { grid-template-columns: 1fr; }
+                body { padding: 15px; }
+                .card { padding: 16px; }
+            }
+            
+            /* Scrollbar styling */
+            ::-webkit-scrollbar { width: 8px; }
+            ::-webkit-scrollbar-track { background: var(--bg-primary); }
+            ::-webkit-scrollbar-thumb { background: var(--blue-electric); border-radius: 4px; }
+            ::-webkit-scrollbar-thumb:hover { background: var(--red-neon); }
+            
+            /* Icon styling */
+            .icon { display: inline-block; margin-right: 6px; }
         </style>
         <script>
-            function generateWaybillPDF(shipment) {
+            // City code mapping for UAE cities
+            function getCityCode(city) {
+                if (!city) return 'UAE';
+                const cityLower = city.toLowerCase().trim();
+
+                // UAE Cities
+                if (cityLower.includes('dubai') || cityLower === 'dxb') return 'DXB';
+                if (cityLower.includes('sharjah') || cityLower === 'shj') return 'SHJ';
+                if (cityLower.includes('abu dhabi') || cityLower.includes('abudhabi')) return 'AUH';
+                if (cityLower.includes('ajman')) return 'AJM';
+                if (cityLower.includes('fujairah') || cityLower.includes('fujeirah')) return 'FUJ';
+                if (cityLower.includes('ras al') || cityLower.includes('rak')) return 'RAK';
+                if (cityLower.includes('umm al') || cityLower.includes('uaq')) return 'UAQ';
+                if (cityLower.includes('al ain')) return 'AAN';
+
+                // Default: first 3 letters uppercase
+                return city.substring(0, 3).toUpperCase();
+            }
+
+            // Encode package data for route scanning QR
+            function encodePackageData(shipment) {
+                const data = {
+                    w: shipment.waybillNumber,
+                    n: shipment.customerName,
+                    p: shipment.customerPhone,
+                    a: (shipment.address || '').substring(0, 50),
+                    c: shipment.city,
+                    kg: shipment.weight,
+                    s: shipment.serviceType,
+                    cod: shipment.codRequired ? shipment.codAmount : '0',
+                    pcs: shipment.pieces
+                };
+                return btoa(JSON.stringify(data));
+            }
+
+            async function generateWaybillPDF(shipment) {
                 const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                
+                // Standard shipping label (100mm x 150mm)
+                const pdf = new jsPDF({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: [100, 150],
+                });
 
-                pdf.setFillColor('#1e40af');
-                pdf.rect(0, 0, 210, 40, 'F');
-                pdf.setTextColor(255, 255, 255);
-                pdf.setFontSize(24);
+                const pageWidth = 100;
+                const pageHeight = 150;
+                const margin = 3;
+                const contentWidth = pageWidth - (margin * 2);
+
+                // Black and white colors only
+                const black = '#000000';
+                const white = '#FFFFFF';
+
+                // Black border
+                pdf.setDrawColor(black);
+                pdf.setLineWidth(1);
+                pdf.rect(1, 1, pageWidth - 2, pageHeight - 2);
+
+                let y = margin + 2;
+
+                // ===== HEADER: Logo =====
+                pdf.setFontSize(18);
                 pdf.setFont('helvetica', 'bold');
-                pdf.text('PATHXPRESS', 15, 20);
-                pdf.setFontSize(10);
+                pdf.setTextColor(black);
+                pdf.text('PATHXPRESS', margin, y + 8);
+
+                // Date on right
+                pdf.setFontSize(7);
                 pdf.setFont('helvetica', 'normal');
-                pdf.text('Reliable Delivery Services in the UAE', 15, 28);
-                pdf.setFontSize(16);
+                const dateStr = new Date(shipment.createdAt || new Date()).toLocaleDateString('en-GB');
+                pdf.text(dateStr, pageWidth - margin, y + 4, { align: 'right' });
+                pdf.setFontSize(8);
                 pdf.setFont('helvetica', 'bold');
-                pdf.text('Waybill: ' + shipment.waybillNumber, 15, 36);
+                pdf.text(shipment.waybillNumber, pageWidth - margin, y + 9, { align: 'right' });
 
-                const canvas = document.createElement('canvas');
-                try {
-                    JsBarcode(canvas, shipment.waybillNumber, { format: 'CODE128', width: 2, height: 60, displayValue: false });
-                    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 140, 10, 60, 25);
-                } catch (e) { console.error(e); }
+                y += 16;
 
-                pdf.setFillColor('#dc2626');
-                pdf.roundedRect(140, 36, 60, 8, 2, 2, 'F');
-                pdf.setTextColor(255, 255, 255);
-                pdf.setFontSize(10);
-                pdf.text(shipment.serviceType === 'SAMEDAY' ? 'EXPRESS' : 'STANDARD', 170, 41, { align: 'center' });
+                // Separator line
+                pdf.setDrawColor(black);
+                pdf.setLineWidth(0.5);
+                pdf.line(margin, y, pageWidth - margin, y);
 
-                pdf.setTextColor('#1f2937');
-                let yPos = 55;
-                pdf.setFillColor('#f3f4f6');
-                pdf.rect(10, yPos, 90, 8, 'F');
-                pdf.setFontSize(12);
+                // ===== SHIPPER (FROM) Section =====
+                y += 2;
+
+                pdf.setFontSize(6);
                 pdf.setFont('helvetica', 'bold');
-                pdf.text('SHIPPER INFORMATION', 15, yPos + 5.5);
-                yPos += 12;
-                pdf.setFontSize(10);
-                pdf.text(shipment.shipperName || '', 15, yPos);
-                yPos += 5;
-                pdf.setFont('helvetica', 'normal');
-                pdf.text(shipment.shipperAddress || '', 15, yPos);
-                yPos += 5;
-                pdf.text((shipment.shipperCity || '') + ', ' + (shipment.shipperCountry || ''), 15, yPos);
-                yPos += 5;
-                pdf.text('Phone: ' + (shipment.shipperPhone || ''), 15, yPos);
-
-                yPos = 55;
-                pdf.setFillColor('#f3f4f6');
-                pdf.rect(110, yPos, 90, 8, 'F');
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('CONSIGNEE INFORMATION', 115, yPos + 5.5);
-                yPos += 12;
-                pdf.setFontSize(10);
-                pdf.text(shipment.customerName || '', 115, yPos);
-                yPos += 5;
-                pdf.setFont('helvetica', 'normal');
-                pdf.text(shipment.address || '', 115, yPos);
-                yPos += 5;
-                pdf.text((shipment.city || '') + ', ' + (shipment.destinationCountry || ''), 115, yPos);
-                yPos += 5;
-                pdf.text('Phone: ' + (shipment.customerPhone || ''), 115, yPos);
-
-                if (shipment.codRequired && shipment.codAmount) {
-                    yPos = 100;
-                    pdf.setFillColor(255, 165, 0);
-                    pdf.rect(10, yPos, 190, 15, 'F');
-                    pdf.setTextColor(255, 255, 255);
-                    pdf.setFontSize(14);
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('CASH ON DELIVERY (COD)', 15, yPos + 6);
-                    pdf.setFontSize(12);
-                    pdf.text('COLLECT: ' + shipment.codAmount + ' ' + (shipment.codCurrency || 'AED'), 15, yPos + 12);
-                    pdf.setTextColor('#1f2937');
-                    yPos += 20;
-                } else {
-                    yPos = 100;
-                }
-
-                pdf.setFillColor('#f3f4f6');
-                pdf.rect(10, yPos, 190, 8, 'F');
-                pdf.setFontSize(12);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('SHIPMENT DETAILS', 15, yPos + 5.5);
-                yPos += 15;
-                pdf.setFontSize(10);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Pieces:', 15, yPos);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text((shipment.pieces || 1).toString(), 35, yPos);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Weight:', 75, yPos);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text((shipment.weight || 0) + ' kg', 95, yPos);
-                pdf.setFont('helvetica', 'bold');
-                pdf.text('Status:', 135, yPos);
-                pdf.setFont('helvetica', 'normal');
-                pdf.text((shipment.status || '').replace(/_/g, ' ').toUpperCase(), 155, yPos);
-
-                yPos = 150;
-                try {
-                    const canvas2 = document.createElement('canvas');
-                    JsBarcode(canvas2, shipment.waybillNumber, { format: 'CODE128', width: 3, height: 80, displayValue: true, fontSize: 14 });
-                    pdf.addImage(canvas2.toDataURL('image/png'), 'PNG', 40, yPos, 130, 40);
-                } catch (e) { console.error(e); }
+                pdf.setTextColor(black);
+                pdf.text('FROM:', margin, y + 3);
 
                 pdf.setFontSize(8);
-                pdf.setTextColor(128, 128, 128);
-                pdf.text('PATHXPRESS FZCO | Dubai, UAE | info@pathxpress.ae', 105, 270, { align: 'center' });
+                pdf.text(shipment.shipperName || '', margin + 11, y + 3);
+
+                pdf.setFontSize(7);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text((shipment.shipperPhone || '') + ' | ' + (shipment.shipperCity || ''), margin + 11, y + 7);
+
+                y += 10;
+                pdf.line(margin, y, pageWidth - margin, y);
+
+                // ===== CONSIGNEE (TO) Section =====
+                y += 2;
+
+                pdf.setFontSize(6);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text('TO:', margin, y + 4);
+
+                // Customer name (large and bold)
+                pdf.setFontSize(13);
+                pdf.text(shipment.customerName || '', margin + 7, y + 5);
+
+                // Phone
+                pdf.setFontSize(11);
+                pdf.text(shipment.customerPhone || '', margin + 7, y + 11);
+
+                // Address
+                pdf.setFontSize(8);
+                pdf.setFont('helvetica', 'normal');
+                const addressLines = pdf.splitTextToSize(shipment.address || '', contentWidth - 35);
+                pdf.text(addressLines.slice(0, 2), margin + 7, y + 16);
+
+                // City (bold)
+                pdf.setFont('helvetica', 'bold');
+                pdf.text((shipment.city || '') + ', ' + (shipment.destinationCountry || 'UAE'), margin + 7, y + 24);
+
+                // ROUTING CODE + QR (right side)
+                const routingX = pageWidth - margin - 40;
+                const cityCode = getCityCode(shipment.city);
+
+                // City code box (black background)
+                pdf.setFillColor(black);
+                pdf.rect(routingX, y, 18, 22, 'F');
+
+                pdf.setFontSize(16);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(white);
+                pdf.text(cityCode, routingX + 9, y + 14, { align: 'center' });
+
+                // Service type below city code
+                pdf.setFontSize(8);
+                const serviceType = shipment.serviceType === 'SDD' || shipment.serviceType === 'SAMEDAY' ? 'SDD' : 'DOM';
+                pdf.text(serviceType, routingX + 9, y + 20, { align: 'center' });
+                pdf.setTextColor(black);
+
+                // QR Code with encoded package data (for route scanning)
+                const qrSize = 20;
+                const qrX = routingX + 20;
+
+                try {
+                    const packageData = encodePackageData(shipment);
+                    const qrCanvas = document.createElement('canvas');
+                    await QRCode.toCanvas(qrCanvas, packageData, { width: 200, margin: 0 });
+                    pdf.addImage(qrCanvas.toDataURL('image/png'), 'PNG', qrX, y + 1, qrSize, qrSize);
+                } catch (e) {
+                    pdf.setDrawColor(black);
+                    pdf.rect(qrX, y + 1, qrSize, qrSize);
+                    pdf.setFontSize(5);
+                    pdf.text('SCAN', qrX + qrSize / 2, y + qrSize / 2, { align: 'center' });
+                }
+
+                y += 28;
+                pdf.setDrawColor(black);
+                pdf.line(margin, y, pageWidth - margin, y);
+
+                // ===== PACKAGE INFO + COD =====
+                y += 2;
+
+                // Info grid - 4 columns
+                const colWidth = contentWidth / 4;
+
+                // Pieces
+                pdf.setDrawColor(black);
+                pdf.setLineWidth(0.3);
+                pdf.rect(margin, y, colWidth, 14);
+                pdf.setFontSize(6);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text('PCS', margin + colWidth / 2, y + 4, { align: 'center' });
+                pdf.setFontSize(12);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text((shipment.pieces || 1).toString(), margin + colWidth / 2, y + 11, { align: 'center' });
+
+                // Weight
+                pdf.rect(margin + colWidth, y, colWidth, 14);
+                pdf.setFontSize(6);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text('KG', margin + colWidth + colWidth / 2, y + 4, { align: 'center' });
+                pdf.setFontSize(12);
+                pdf.setFont('helvetica', 'bold');
+                const weightVal = typeof shipment.weight === 'string' ? parseFloat(shipment.weight) : (shipment.weight || 0);
+                pdf.text(weightVal.toFixed(1), margin + colWidth + colWidth / 2, y + 11, { align: 'center' });
+
+                // Service Type
+                pdf.rect(margin + colWidth * 2, y, colWidth, 14);
+                pdf.setFontSize(6);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text('SERVICE', margin + colWidth * 2 + colWidth / 2, y + 4, { align: 'center' });
+                pdf.setFontSize(12);
+                pdf.setFont('helvetica', 'bold');
+                pdf.text(serviceType, margin + colWidth * 2 + colWidth / 2, y + 11, { align: 'center' });
+
+                // COD or Prepaid
+                pdf.rect(margin + colWidth * 3, y, colWidth, 14);
+
+                if (shipment.codRequired && shipment.codAmount) {
+                    // COD - black background
+                    pdf.setFillColor(black);
+                    pdf.rect(margin + colWidth * 3, y, colWidth, 14, 'F');
+                    pdf.setFontSize(6);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.setTextColor(white);
+                    pdf.text('COD', margin + colWidth * 3 + colWidth / 2, y + 4, { align: 'center' });
+                    pdf.setFontSize(9);
+                    const codAmount = parseFloat(shipment.codAmount).toFixed(0);
+                    pdf.text(codAmount, margin + colWidth * 3 + colWidth / 2, y + 11, { align: 'center' });
+                    pdf.setTextColor(black);
+                } else {
+                    pdf.setFontSize(6);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text('STATUS', margin + colWidth * 3 + colWidth / 2, y + 4, { align: 'center' });
+                    pdf.setFontSize(8);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.text('PREPAID', margin + colWidth * 3 + colWidth / 2, y + 11, { align: 'center' });
+                }
+
+                y += 16;
+
+                // ===== SPECIAL INSTRUCTIONS =====
+                if (shipment.specialInstructions && shipment.specialInstructions.trim()) {
+                    pdf.setDrawColor(black);
+                    pdf.setLineWidth(0.5);
+                    pdf.rect(margin, y, contentWidth, 10);
+
+                    pdf.setFontSize(6);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.text('NOTE:', margin + 2, y + 4);
+
+                    pdf.setFontSize(7);
+                    pdf.setFont('helvetica', 'normal');
+                    const instrLines = pdf.splitTextToSize(shipment.specialInstructions, contentWidth - 15);
+                    pdf.text(instrLines.slice(0, 1).join(' '), margin + 12, y + 4);
+
+                    y += 12;
+                }
+
+                // ===== MAIN BARCODE (Large, High Quality) =====
+                y = pageHeight - 35;
+
+                pdf.setDrawColor(black);
+                pdf.setLineWidth(0.3);
+                pdf.line(margin, y - 2, pageWidth - margin, y - 2);
+
+                try {
+                    const canvas = document.createElement('canvas');
+                    JsBarcode(canvas, shipment.waybillNumber, {
+                        format: 'CODE128',
+                        width: 3,
+                        height: 60,
+                        displayValue: false,
+                        margin: 0,
+                        background: '#FFFFFF',
+                        lineColor: '#000000'
+                    });
+                    const barcodeUrl = canvas.toDataURL('image/png');
+                    pdf.addImage(barcodeUrl, 'PNG', margin + 5, y, contentWidth - 10, 18);
+                } catch (e) {
+                    console.error('Barcode error:', e);
+                }
+
+                // Waybill number text (separate for clarity)
+                pdf.setFontSize(14);
+                pdf.setFont('helvetica', 'bold');
+                pdf.setTextColor(black);
+                pdf.text(shipment.waybillNumber, pageWidth / 2, y + 24, { align: 'center' });
+
+                // Footer
+                pdf.setFontSize(6);
+                pdf.setFont('helvetica', 'normal');
+                pdf.text('pathxpress.net  |  +971 522803433', pageWidth / 2, pageHeight - 4, { align: 'center' });
+
+                // Save
                 pdf.save('waybill-' + shipment.waybillNumber + '.pdf');
             }
         </script>
       </head>
       <body>
         <div class="card">
-            <h1>PATHXPRESS Portal</h1>
-            <p>Connected shop: <b>${shop}</b></p>
-            ${isConnected ? '<span style="color:green; font-weight:bold;">● Connected</span>' : '<span style="color:red; font-weight:bold;">● Disconnected</span>'}
+            <h1>🚀 PATHXPRESS Portal</h1>
+            <p>Connected shop: <strong style="color: var(--text-primary);">${shop}</strong></p>
+            ${isConnected ? '<span class="status-connected">Connected</span>' : '<span class="status-disconnected">Disconnected</span>'}
         </div>
 
         ${isConnected
@@ -867,14 +1408,13 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         <input type="number" id="clientId" name="clientId" placeholder="Enter your Client ID" required value="${currentClientId || ''}" style="flex:1; margin-bottom:0;" onchange="validateClientId(this.value)" />
                         <button type="button" onclick="validateClientId(document.getElementById('clientId').value)" style="background:#5c6ac4; padding:10px 15px;">Verify</button>
                     </div>
-                    <div id="clientFeedback" style="margin-top:8px; padding:8px; border-radius:4px; display:none;"></div>
+                    <div id="clientFeedback" class="feedback-box feedback-info" style="display:none;"></div>
                     <script>
                         async function validateClientId(id) {
                             if (!id) return;
                             const feedback = document.getElementById('clientFeedback');
                             feedback.style.display = 'block';
-                            feedback.style.background = '#f4f6f8';
-                            feedback.style.color = '#333';
+                            feedback.className = 'feedback-box feedback-info';
                             feedback.innerHTML = '🔍 Verifying...';
                             
                             // Timeout controller
@@ -888,23 +1428,18 @@ app.get("/app", requireSessionToken, async (req, res) => {
                                 clearTimeout(timeoutId);
                                 const data = await res.json();
                                 if (data.found) {
-                                    feedback.style.background = '#d4edda';
-                                    feedback.style.color = '#155724';
+                                    feedback.className = 'feedback-box feedback-success';
                                     feedback.innerHTML = '✅ <strong>' + data.companyName + '</strong> (Contact: ' + (data.contactName || 'N/A') + ')';
                                 } else {
-                                    feedback.style.background = '#f8d7da';
-                                    feedback.style.color = '#721c24';
+                                    feedback.className = 'feedback-box feedback-error';
                                     feedback.innerHTML = '❌ Client ID not found. Please check and try again.';
                                 }
                             } catch (e) {
                                 clearTimeout(timeoutId);
+                                feedback.className = 'feedback-box feedback-warning';
                                 if (e.name === 'AbortError') {
-                                    feedback.style.background = '#fff3cd';
-                                    feedback.style.color = '#856404';
                                     feedback.innerHTML = '⏱️ Verification timed out. Will save anyway.';
                                 } else {
-                                    feedback.style.background = '#fff3cd';
-                                    feedback.style.color = '#856404';
                                     feedback.innerHTML = '⚠️ Could not verify. Will save anyway.';
                                 }
                             }
@@ -923,60 +1458,58 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             if (fieldset.disabled) {
                                 fieldset.disabled = false;
                                 editBtn.innerHTML = '❌ Cancel';
-                                editBtn.style.background = '#dc2626';
+                                editBtn.className = 'btn-danger';
                                 saveBtn.style.display = 'inline-block';
                             } else {
                                 fieldset.disabled = true;
                                 editBtn.innerHTML = '✏️ Edit Settings';
-                                editBtn.style.background = '#5c6ac4';
+                                editBtn.className = 'btn-secondary';
                                 saveBtn.style.display = 'none';
                             }
                         }
                     </script>
 
-                    <h3 style="margin-top:20px; font-size:16px;">🔍 Sync Filters</h3>
-                    <div style="margin-bottom:15px; padding:10px; background:#f4f6f8; border-radius:4px;">
-                        <label style="display:flex; align-items:center; gap:10px; font-weight:normal;">
+                    <h3 style="margin-top:24px; font-size:16px;">🔍 Sync Filters</h3>
+                    <div class="settings-section">
+                        <div class="checkbox-wrapper">
                             <input type="checkbox" name="auto_sync" value="1" ${currentAutoSync ? 'checked' : ''} />
-                            Automatically sync all orders
-                        </label>
-                        <p style="font-size:12px; color:#666; margin-left:25px; margin-top:5px;">
+                            <label style="margin-bottom:0;">Automatically sync all orders</label>
+                        </div>
+                        <p class="helper-text">
                             If disabled, only orders with the specified Tag below will be synced.
                         </p>
                         
-                        <label for="sync_tag" style="margin-top:10px;">Required Tag (Optional):</label>
-                        <input type="text" id="sync_tag" name="sync_tag" placeholder="Ej: send_pathxpress" value="${currentSyncTag}" />
-                        <p style="font-size:12px; color:#666;">If you enter a tag (e.g., "send_pathxpress"), ONLY orders with that tag in Shopify will be synced.</p>
+                        <label for="sync_tag" style="margin-top:16px;">Required Tag (Optional):</label>
+                        <input type="text" id="sync_tag" name="sync_tag" placeholder="e.g., send_pathxpress" value="${currentSyncTag}" />
+                        <p class="helper-text" style="margin-left:0;">If you enter a tag (e.g., "send_pathxpress"), ONLY orders with that tag in Shopify will be synced.</p>
                     </div>
 
-                    <h3 style="margin-top:20px; font-size:16px;">🚚 Default Shipping Service</h3>
-                    <p style="font-size:13px; color:#666;">Select the default PathXpress service type for all orders from this store.</p>
+                    <h3 style="margin-top:24px; font-size:16px;">🚚 Default Shipping Service</h3>
+                    <p style="font-size:13px; margin-bottom:12px;">Select the default PathXpress service type for all orders from this store.</p>
                     
-                    <div style="margin-bottom:15px;">
-                        <select name="default_service_type" id="default_service_type" style="width:100%; padding:10px; border:1px solid #c4cdd5; border-radius:3px; font-size:14px;">
+                    <div class="settings-section">
+                        <select name="default_service_type" id="default_service_type">
                             <option value="DOM" ${currentServiceType === 'DOM' ? 'selected' : ''}>🏠 DOM - Domestic Standard (1-2 days)</option>
                             <option value="SAMEDAY" ${currentServiceType === 'SAMEDAY' ? 'selected' : ''}>⚡ SAMEDAY - Same Day Express</option>
                             <option value="NEXTDAY" ${currentServiceType === 'NEXTDAY' ? 'selected' : ''}>📦 NEXTDAY - Next Day Delivery</option>
                         </select>
                     </div>
                     
-                    <h3 style="margin-top:20px; font-size:16px;">🎁 Free Shipping</h3>
-                    <p style="font-size:13px; color:#666;">Set minimum order amounts for free shipping. Leave empty to disable.</p>
+                    <h3 style="margin-top:24px; font-size:16px;">🎁 Free Shipping</h3>
+                    <p style="font-size:13px; margin-bottom:12px;">Set minimum order amounts for free shipping. Leave empty to disable.</p>
                     
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                    <div class="settings-section grid-2">
                         <div>
                             <label for="free_shipping_dom">📦 Standard (DOM):</label>
                             <input type="number" step="0.01" min="0" id="free_shipping_dom" name="free_shipping_dom" 
-                                   placeholder="e.g., 200" value="${freeShippingDOM}" 
-                                   style="width:100%; padding:10px; border:1px solid #c4cdd5; border-radius:3px; box-sizing:border-box;" />
-                            <p style="font-size:11px; color:#888; margin-top:4px;">1-2 day delivery</p>
+                                   placeholder="e.g., 200" value="${freeShippingDOM}" />
+                            <p class="helper-text" style="margin-left:0;">1-2 day delivery</p>
                         </div>
                         <div>
                             <label for="free_shipping_express">⚡ Express (Same Day):</label>
                             <input type="number" step="0.01" min="0" id="free_shipping_express" name="free_shipping_express" 
-                                   placeholder="e.g., 500" value="${freeShippingExpress}" 
-                                   style="width:100%; padding:10px; border:1px solid #c4cdd5; border-radius:3px; box-sizing:border-box;" />
-                            <p style="font-size:11px; color:#888; margin-top:4px;">Same day delivery</p>
+                                   placeholder="e.g., 500" value="${freeShippingExpress}" />
+                            <p class="helper-text" style="margin-left:0;">Same day delivery</p>
                         </div>
                     </div>
                     
@@ -988,15 +1521,15 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
               <div class="card">
                 <h2>📦 My PathXpress Shipments</h2>
-                <p>Last 20 processed shipments.</p>
-                <table style="width:100%; border-collapse:collapse; font-size:14px;">
+                <p style="margin-bottom:16px;">Last 20 processed shipments.</p>
+                <table>
                     <thead>
-                        <tr style="background:#f4f6f8; text-align:left;">
-                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Order #</th>
-                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Waybill</th>
-                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Status</th>
-                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Date</th>
-                            <th style="padding:10px; border-bottom:1px solid #dfe3e8;">Actions</th>
+                        <tr>
+                            <th>Order #</th>
+                            <th>Waybill</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                            <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1006,9 +1539,10 @@ app.get("/app", requireSessionToken, async (req, res) => {
               </div>
             `
             : `
-              <div class="card">
-                <p>To start, connect your shop to PATHXPRESS.</p>
-                <a href="/auth?shop=${shop}" target="_top" style="background:#008060; color:white; padding:12px 20px; text-decoration:none; border-radius:4px; font-weight:bold;">Connect now</a>
+              <div class="card" style="text-align:center; padding:40px;">
+                <h2 style="justify-content:center;">🔗 Connect Your Store</h2>
+                <p style="margin-bottom:24px;">To start using PathXpress shipping, connect your Shopify store.</p>
+                <a href="/auth?shop=${shop}" target="_top" style="display:inline-block; background:linear-gradient(135deg, var(--blue-electric), #1e5ad4); color:white; padding:14px 28px; text-decoration:none; border-radius:10px; font-weight:600; box-shadow:0 4px 15px rgba(45, 108, 246, 0.3); transition:all 0.3s ease;">🚀 Connect now</a>
               </div>
             `
         }
