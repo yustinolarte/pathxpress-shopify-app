@@ -692,6 +692,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>PATHXPRESS Portal</title>
+        <!-- Shopify App Bridge - Required in head for embedded apps -->
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
@@ -1618,28 +1620,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
             `
         }
         
-        <!-- App Bridge for Shopify embedded apps -->
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-        <script>
-            // Initialize App Bridge (deferred to avoid blocking page load)
-            (function() {
-                try {
-                    var AppBridge = window['app-bridge'];
-                    if (AppBridge && AppBridge.default) {
-                        var host = new URLSearchParams(location.search).get('host');
-                        if (host) {
-                            window.shopifyApp = AppBridge.default({
-                                apiKey: '${process.env.SHOPIFY_API_KEY}',
-                                host: host,
-                            });
-                            console.log('✅ App Bridge initialized');
-                        }
-                    }
-                } catch (e) {
-                    console.warn('App Bridge init skipped:', e.message);
-                }
-            })();
-        </script>
+        <!-- App Bridge initialized in head -->
         <script>
             // Initialize Lucide Icons
             document.addEventListener('DOMContentLoaded', function() {
