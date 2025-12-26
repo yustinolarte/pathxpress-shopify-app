@@ -584,7 +584,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
     let currentAutoSync = true;
     let currentSyncTag = "";
     let currentServiceType = "DOM"; // Default service type
-    let freeShippingThreshold = ""; // Umbral para envío gratis
+    let freeShippingDOM = ""; // Umbral para envío gratis Standard
+    let freeShippingExpress = ""; // Umbral para envío gratis Express
     let shipmentsRows = "<tr><td colspan='5'>No recent shipments.</td></tr>";
     let metrics = { todayCount: 0, activeCount: 0, pendingCod: 0 };
     let shopData = null;
@@ -597,7 +598,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
             currentAutoSync = shopData.auto_sync !== 0; // MySQL boolean is 0/1
             currentServiceType = shopData.default_service_type || "DOM";
             currentSyncTag = shopData.sync_tag || "";
-            freeShippingThreshold = shopData.free_shipping_threshold || "";
+            freeShippingDOM = shopData.free_shipping_threshold_dom || "";
+            freeShippingExpress = shopData.free_shipping_threshold_express || "";
         }
 
         // 2. Obtener métricas y envíos
@@ -959,14 +961,23 @@ app.get("/app", requireSessionToken, async (req, res) => {
                     </div>
                     
                     <h3 style="margin-top:20px; font-size:16px;">🎁 Free Shipping</h3>
-                    <p style="font-size:13px; color:#666;">Set a minimum order amount for free shipping. Leave empty to disable.</p>
+                    <p style="font-size:13px; color:#666;">Set minimum order amounts for free shipping. Leave empty to disable.</p>
                     
-                    <div style="margin-bottom:15px;">
-                        <label for="free_shipping_threshold">Minimum Order Amount (AED):</label>
-                        <input type="number" step="0.01" min="0" id="free_shipping_threshold" name="free_shipping_threshold" 
-                               placeholder="e.g., 200" value="${freeShippingThreshold}" 
-                               style="width:100%; padding:10px; border:1px solid #c4cdd5; border-radius:3px;" />
-                        <p style="font-size:12px; color:#666;">Orders above this amount will get FREE shipping at checkout.</p>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:15px;">
+                        <div>
+                            <label for="free_shipping_dom">📦 Standard (DOM):</label>
+                            <input type="number" step="0.01" min="0" id="free_shipping_dom" name="free_shipping_dom" 
+                                   placeholder="e.g., 200" value="${freeShippingDOM}" 
+                                   style="width:100%; padding:10px; border:1px solid #c4cdd5; border-radius:3px; box-sizing:border-box;" />
+                            <p style="font-size:11px; color:#888; margin-top:4px;">1-2 day delivery</p>
+                        </div>
+                        <div>
+                            <label for="free_shipping_express">⚡ Express (Same Day):</label>
+                            <input type="number" step="0.01" min="0" id="free_shipping_express" name="free_shipping_express" 
+                                   placeholder="e.g., 500" value="${freeShippingExpress}" 
+                                   style="width:100%; padding:10px; border:1px solid #c4cdd5; border-radius:3px; box-sizing:border-box;" />
+                            <p style="font-size:11px; color:#888; margin-top:4px;">Same day delivery</p>
+                        </div>
                     </div>
                     
                     </fieldset>
@@ -1063,7 +1074,7 @@ app.get("/api/validate-client/:id", async (req, res) => {
 // 4.1) GUARDAR CONFIGURACIÓN
 // ======================
 app.post("/app/save-settings", express.urlencoded({ extended: true }), async (req, res) => {
-    const { shop, clientId, default_service_type, auto_sync, sync_tag, free_shipping_threshold } = req.body;
+    const { shop, clientId, default_service_type, auto_sync, sync_tag, free_shipping_dom, free_shipping_express } = req.body;
 
     if (!shop || !clientId) {
         return res.send("Error: Missing data. Please provide a Client ID.");
@@ -1071,25 +1082,29 @@ app.post("/app/save-settings", express.urlencoded({ extended: true }), async (re
 
     const isAutoSync = auto_sync === "1" ? 1 : 0;
     const serviceType = default_service_type || "DOM";
-    const freeShippingValue = free_shipping_threshold && parseFloat(free_shipping_threshold) > 0
-        ? parseFloat(free_shipping_threshold)
+    const freeShippingDOMValue = free_shipping_dom && parseFloat(free_shipping_dom) > 0
+        ? parseFloat(free_shipping_dom)
+        : null;
+    const freeShippingExpressValue = free_shipping_express && parseFloat(free_shipping_express) > 0
+        ? parseFloat(free_shipping_express)
         : null;
 
     try {
         // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            `INSERT INTO shopify_shops (shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold)
-             VALUES (?, ?, ?, ?, ?, ?)
+            `INSERT INTO shopify_shops (shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 pathxpress_client_id = VALUES(pathxpress_client_id),
                 default_service_type = VALUES(default_service_type),
                 auto_sync = VALUES(auto_sync),
                 sync_tag = VALUES(sync_tag),
-                free_shipping_threshold = VALUES(free_shipping_threshold),
+                free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
+                free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
                 updated_at = CURRENT_TIMESTAMP`,
-            [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingValue]
+            [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingDOMValue, freeShippingExpressValue]
         );
-        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync}, Tag = ${sync_tag}, FreeShipping = ${freeShippingValue}`);
+        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync}, FreeDOM = ${freeShippingDOMValue}, FreeExpress = ${freeShippingExpressValue}`);
         res.redirect(`/app?shop=${shop}`);
     } catch (err) {
         console.error("Error saving settings:", err);
@@ -1186,42 +1201,46 @@ app.post("/api/shipping-rates", async (req, res) => {
 
         console.log(`💵 Base rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED`);
 
-        // 7. Verificar FREE SHIPPING
-        const freeShippingThresholdRaw = shopData.free_shipping_threshold;
-        const freeShippingThreshold = freeShippingThresholdRaw ? parseFloat(freeShippingThresholdRaw) : 0;
-        let isFreeShipping = false;
+        // 7. Verificar FREE SHIPPING (umbrales separados para DOM y Express)
+        const freeShippingDOMRaw = shopData.free_shipping_threshold_dom;
+        const freeShippingExpressRaw = shopData.free_shipping_threshold_express;
+        const freeShippingDOM = freeShippingDOMRaw ? parseFloat(freeShippingDOMRaw) : 0;
+        const freeShippingExpress = freeShippingExpressRaw ? parseFloat(freeShippingExpressRaw) : 0;
 
-        console.log(`🔧 Free shipping threshold raw: ${freeShippingThresholdRaw}, parsed: ${freeShippingThreshold}`);
+        let isDOMFree = false;
+        let isExpressFree = false;
 
-        if (freeShippingThreshold > 0) {
-            // Calcular precio total de los productos (Shopify envía price en centavos)
-            const totalItemsPrice = items.reduce((sum, item) => {
-                const itemPrice = parseInt(item.price || 0) / 100; // Convertir de centavos a AED
-                console.log(`   Item: price=${item.price} cents, quantity=${item.quantity}, subtotal=${itemPrice * (item.quantity || 1)} AED`);
-                return sum + (itemPrice * (item.quantity || 1));
-            }, 0);
+        console.log(`🔧 Free shipping thresholds - DOM: ${freeShippingDOM}, Express: ${freeShippingExpress}`);
 
-            console.log(`🛒 Order total: ${totalItemsPrice} AED, Free shipping threshold: ${freeShippingThreshold} AED`);
+        // Calcular precio total de los productos
+        const totalItemsPrice = items.reduce((sum, item) => {
+            const itemPrice = parseInt(item.price || 0) / 100; // Convertir de centavos a AED
+            return sum + (itemPrice * (item.quantity || 1));
+        }, 0);
 
-            if (totalItemsPrice >= freeShippingThreshold) {
-                isFreeShipping = true;
-                domPrice = 0;
-                sddPrice = 0;
-                console.log(`🎁 FREE SHIPPING applied! Order ${totalItemsPrice} AED >= threshold ${freeShippingThreshold} AED`);
-            } else {
-                console.log(`📦 Normal shipping: ${totalItemsPrice} AED < threshold ${freeShippingThreshold} AED`);
-            }
-        } else {
-            console.log(`📦 Free shipping not configured (threshold: ${freeShippingThreshold})`);
+        console.log(`🛒 Order total: ${totalItemsPrice} AED`);
+
+        // Verificar umbral DOM
+        if (freeShippingDOM > 0 && totalItemsPrice >= freeShippingDOM) {
+            isDOMFree = true;
+            domPrice = 0;
+            console.log(`🎁 FREE DOM shipping! ${totalItemsPrice} AED >= ${freeShippingDOM} AED`);
         }
 
-        console.log(`💵 Final rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED${isFreeShipping ? ' (FREE SHIPPING!)' : ''}`);
+        // Verificar umbral Express
+        if (freeShippingExpress > 0 && totalItemsPrice >= freeShippingExpress) {
+            isExpressFree = true;
+            sddPrice = 0;
+            console.log(`🎁 FREE EXPRESS shipping! ${totalItemsPrice} AED >= ${freeShippingExpress} AED`);
+        }
+
+        console.log(`💵 Final rates - DOM: ${domPrice} AED${isDOMFree ? ' (FREE!)' : ''}, SDD: ${sddPrice} AED${isExpressFree ? ' (FREE!)' : ''}`);
 
         // 8. Respuesta formato Shopify
         const response = {
             rates: [
                 {
-                    service_name: isFreeShipping ? "PathXpress Standard (FREE!)" : "PathXpress Standard",
+                    service_name: isDOMFree ? "PathXpress Standard (FREE!)" : "PathXpress Standard",
                     service_code: "DOM",
                     total_price: Math.round(domPrice * 100).toString(), // En centavos
                     currency: "AED",
@@ -1229,7 +1248,7 @@ app.post("/api/shipping-rates", async (req, res) => {
                     max_delivery_date: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
                 },
                 {
-                    service_name: isFreeShipping ? "PathXpress Same Day (FREE!)" : "PathXpress Same Day",
+                    service_name: isExpressFree ? "PathXpress Same Day (FREE!)" : "PathXpress Same Day",
                     service_code: "SAMEDAY",
                     total_price: Math.round(sddPrice * 100).toString(), // En centavos
                     currency: "AED",
