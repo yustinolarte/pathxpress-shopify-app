@@ -1106,6 +1106,31 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 width: 16px;
                 height: 16px;
             }
+            
+            /* Header Logo Styling */
+            .header-logo {
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                margin-bottom: 16px;
+            }
+            .logo-img {
+                height: 40px;
+                width: auto;
+                object-fit: contain;
+            }
+            .portal-badge {
+                display: inline-block;
+                padding: 6px 14px;
+                background: linear-gradient(135deg, var(--blue-electric), #1e5ad4);
+                color: white;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                box-shadow: 0 2px 10px rgba(45, 108, 246, 0.3);
+            }
         </style>
         <script>
             // City code mapping for UAE cities
@@ -1395,7 +1420,10 @@ app.get("/app", requireSessionToken, async (req, res) => {
       </head>
       <body>
         <div class="card">
-            <h1><i data-lucide="rocket" class="icon"></i>PATHXPRESS Portal</h1>
+            <div class="header-logo">
+                <img src="https://pathxpress.net/pathxpress-logo.png" alt="PATHXPRESS" class="logo-img" />
+                <span class="portal-badge">Shopify Portal</span>
+            </div>
             <p>Connected shop: <strong style="color: var(--text-primary);">${shop}</strong></p>
             ${isConnected ? '<span class="status-connected">Connected</span>' : '<span class="status-disconnected">Disconnected</span>'}
         </div>
