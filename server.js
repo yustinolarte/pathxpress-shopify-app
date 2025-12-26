@@ -872,9 +872,18 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             const feedback = document.getElementById('clientFeedback');
                             feedback.style.display = 'block';
                             feedback.style.background = '#f4f6f8';
+                            feedback.style.color = '#333';
                             feedback.innerHTML = '🔍 Verifying...';
+                            
+                            // Timeout controller
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 10000);
+                            
                             try {
-                                const res = await fetch('/api/validate-client/' + id);
+                                const res = await fetch('/api/validate-client/' + id, {
+                                    signal: controller.signal
+                                });
+                                clearTimeout(timeoutId);
                                 const data = await res.json();
                                 if (data.found) {
                                     feedback.style.background = '#d4edda';
@@ -886,9 +895,16 @@ app.get("/app", requireSessionToken, async (req, res) => {
                                     feedback.innerHTML = '❌ Client ID not found. Please check and try again.';
                                 }
                             } catch (e) {
-                                feedback.style.background = '#fff3cd';
-                                feedback.style.color = '#856404';
-                                feedback.innerHTML = '⚠️ Could not verify. Will save anyway.';
+                                clearTimeout(timeoutId);
+                                if (e.name === 'AbortError') {
+                                    feedback.style.background = '#fff3cd';
+                                    feedback.style.color = '#856404';
+                                    feedback.innerHTML = '⏱️ Verification timed out. Will save anyway.';
+                                } else {
+                                    feedback.style.background = '#fff3cd';
+                                    feedback.style.color = '#856404';
+                                    feedback.innerHTML = '⚠️ Could not verify. Will save anyway.';
+                                }
                             }
                         }
                         // Auto-validate if there's a value on load
@@ -1170,24 +1186,32 @@ app.post("/api/shipping-rates", async (req, res) => {
         console.log(`💵 Base rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED`);
 
         // 7. Verificar FREE SHIPPING
-        const freeShippingThreshold = shopData.free_shipping_threshold;
+        const freeShippingThresholdRaw = shopData.free_shipping_threshold;
+        const freeShippingThreshold = freeShippingThresholdRaw ? parseFloat(freeShippingThresholdRaw) : 0;
         let isFreeShipping = false;
 
-        if (freeShippingThreshold && freeShippingThreshold > 0) {
+        console.log(`🔧 Free shipping threshold raw: ${freeShippingThresholdRaw}, parsed: ${freeShippingThreshold}`);
+
+        if (freeShippingThreshold > 0) {
             // Calcular precio total de los productos (Shopify envía price en centavos)
             const totalItemsPrice = items.reduce((sum, item) => {
                 const itemPrice = parseInt(item.price || 0) / 100; // Convertir de centavos a AED
+                console.log(`   Item: price=${item.price} cents, quantity=${item.quantity}, subtotal=${itemPrice * (item.quantity || 1)} AED`);
                 return sum + (itemPrice * (item.quantity || 1));
             }, 0);
 
             console.log(`🛒 Order total: ${totalItemsPrice} AED, Free shipping threshold: ${freeShippingThreshold} AED`);
 
-            if (totalItemsPrice >= parseFloat(freeShippingThreshold)) {
+            if (totalItemsPrice >= freeShippingThreshold) {
                 isFreeShipping = true;
                 domPrice = 0;
                 sddPrice = 0;
                 console.log(`🎁 FREE SHIPPING applied! Order ${totalItemsPrice} AED >= threshold ${freeShippingThreshold} AED`);
+            } else {
+                console.log(`📦 Normal shipping: ${totalItemsPrice} AED < threshold ${freeShippingThreshold} AED`);
             }
+        } else {
+            console.log(`📦 Free shipping not configured (threshold: ${freeShippingThreshold})`);
         }
 
         console.log(`💵 Final rates - DOM: ${domPrice} AED, SDD: ${sddPrice} AED${isFreeShipping ? ' (FREE SHIPPING!)' : ''}`);
