@@ -2658,3 +2658,37 @@ async function sendShipmentToPathxpress(shipment) {
     }
 }
 
+// ======================
+// KEEP-ALIVE: Prevent Koyeb from sleeping
+// ======================
+const KEEP_ALIVE_INTERVAL = 4 * 60 * 1000; // 4 minutes (before 5 min timeout)
+
+function keepAlive() {
+    const appUrl = process.env.APP_URL;
+    if (!appUrl) {
+        console.log("⚠️ APP_URL not set, keep-alive disabled");
+        return;
+    }
+
+    setInterval(async () => {
+        try {
+            const response = await fetch(appUrl);
+            console.log(`🏓 Keep-alive ping: ${response.status}`);
+        } catch (err) {
+            console.log("⚠️ Keep-alive ping failed:", err.message);
+        }
+    }, KEEP_ALIVE_INTERVAL);
+
+    console.log(`🔄 Keep-alive enabled: pinging every ${KEEP_ALIVE_INTERVAL / 1000}s`);
+}
+
+// ======================
+// START SERVER
+// ======================
+app.listen(PORT, () => {
+    console.log(`🚀 PATHXPRESS Shopify App running on port ${PORT}`);
+    console.log(`📡 App URL: ${process.env.APP_URL || 'Not configured'}`);
+
+    // Start keep-alive after server is running
+    keepAlive();
+});
