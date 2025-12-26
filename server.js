@@ -691,25 +691,49 @@ app.get("/app", requireSessionToken, async (req, res) => {
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
         <script>
-            // Inicializar App Bridge
-            var AppBridge = window['app-bridge'];
-            var createApp = AppBridge.default;
-            var app = createApp({
-                apiKey: '${process.env.SHOPIFY_API_KEY}',
-                host: new URLSearchParams(location.search).get('host'),
-            });
+            // Inicializar App Bridge con manejo de errores
+            var app = null;
+            var appBridgeReady = false;
             
-            // Función para hacer fetch autenticado con Session Token
-            async function authenticatedFetch(url, options = {}) {
-                const sessionToken = await app.getSessionToken();
-                return fetch(url, {
-                    ...options,
-                    headers: {
-                        ...options.headers,
-                        'Authorization': 'Bearer ' + sessionToken,
-                        'Content-Type': 'application/json'
+            try {
+                var AppBridge = window['app-bridge'];
+                if (AppBridge && AppBridge.default) {
+                    var createApp = AppBridge.default;
+                    var host = new URLSearchParams(location.search).get('host');
+                    if (host) {
+                        app = createApp({
+                            apiKey: '${process.env.SHOPIFY_API_KEY}',
+                            host: host,
+                        });
+                        appBridgeReady = true;
+                        console.log('✅ App Bridge initialized successfully');
+                    } else {
+                        console.warn('⚠️ No host parameter found, App Bridge will not initialize');
                     }
-                });
+                }
+            } catch (e) {
+                console.error('❌ App Bridge initialization error:', e);
+            }
+            
+            // Función para hacer fetch autenticado con Session Token (con fallback)
+            async function authenticatedFetch(url, options = {}) {
+                try {
+                    if (app && appBridgeReady) {
+                        const sessionToken = await app.getSessionToken();
+                        return fetch(url, {
+                            ...options,
+                            headers: {
+                                ...options.headers,
+                                'Authorization': 'Bearer ' + sessionToken,
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                    }
+                } catch (e) {
+                    console.warn('⚠️ Session token error, using regular fetch:', e);
+                }
+                // Fallback to regular fetch
+                return fetch(url, options);
             }
         </script>
         <style>
