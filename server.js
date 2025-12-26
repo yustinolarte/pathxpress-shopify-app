@@ -695,8 +695,6 @@ app.get("/app", requireSessionToken, async (req, res) => {
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
-        <!-- Shopify App Bridge -->
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -1476,7 +1474,14 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             const feedback = document.getElementById('clientFeedback');
                             feedback.style.display = 'block';
                             feedback.className = 'feedback-box feedback-info';
-                            feedback.innerHTML = '<i data-lucide="search" class="icon icon-sm"></i>Verifying...';
+                            feedback.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Verifying...</span>';
+                            // Add spin animation if not exists
+                            if (!document.getElementById('spinAnimation')) {
+                                const style = document.createElement('style');
+                                style.id = 'spinAnimation';
+                                style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
+                                document.head.appendChild(style);
+                            }
                             
                             // Timeout controller
                             const controller = new AbortController();
