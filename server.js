@@ -1105,6 +1105,7 @@ app.post("/app/save-settings", express.urlencoded({ extended: true }), async (re
 // ======================
 app.post("/api/shipping-rates", async (req, res) => {
     console.log("💰 Rate request received from Shopify");
+    console.log("📋 Full request body:", JSON.stringify(req.body, null, 2));
 
     try {
         const { rate } = req.body;
