@@ -687,68 +687,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
       <head>
         <meta charset="utf-8" />
         <title>PATHXPRESS Portal</title>
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-        <script>
-            // Inicializar App Bridge con manejo de errores
-            var app = null;
-            var appBridgeReady = false;
-            
-            try {
-                var AppBridge = window['app-bridge'];
-                if (AppBridge && AppBridge.default) {
-                    var createApp = AppBridge.default;
-                    var host = new URLSearchParams(location.search).get('host');
-                    if (host) {
-                        app = createApp({
-                            apiKey: '${process.env.SHOPIFY_API_KEY}',
-                            host: host,
-                        });
-                        appBridgeReady = true;
-                        console.log('✅ App Bridge initialized successfully');
-                    } else {
-                        console.warn('⚠️ No host parameter found, App Bridge will not initialize');
-                    }
-                }
-            } catch (e) {
-                console.error('❌ App Bridge initialization error:', e);
-            }
-            
-            // Función para hacer fetch autenticado con Session Token (con timeout y fallback)
-            async function authenticatedFetch(url, options = {}) {
-                // Helper para timeout
-                function withTimeout(promise, ms) {
-                    return Promise.race([
-                        promise,
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ms))
-                    ]);
-                }
-                
-                try {
-                    if (app && appBridgeReady) {
-                        // Intentar obtener session token con timeout de 3 segundos
-                        const sessionToken = await withTimeout(app.getSessionToken(), 3000);
-                        if (sessionToken) {
-                            console.log('✅ Using authenticated fetch with session token');
-                            return fetch(url, {
-                                ...options,
-                                headers: {
-                                    ...options.headers,
-                                    'Authorization': 'Bearer ' + sessionToken,
-                                    'Content-Type': 'application/json'
-                                }
-                            });
-                        }
-                    }
-                } catch (e) {
-                    console.warn('⚠️ Session token error (will use regular fetch):', e.message);
-                }
-                // Fallback to regular fetch
-                console.log('📡 Using regular fetch');
-                return fetch(url, options);
-            }
-        </script>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 25px; color: #333; }
             .card { background: white; border: 1px solid #dfe3e8; border-radius: 4px; padding: 20px; margin-bottom: 20px; box-shadow: 0 0 0 1px rgba(63, 63, 68, 0.05), 0 1px 3px 0 rgba(63, 63, 68, 0.15); }
@@ -1032,6 +972,29 @@ app.get("/app", requireSessionToken, async (req, res) => {
               </div>
             `
         }
+        
+        <!-- App Bridge for Shopify embedded apps -->
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+        <script>
+            // Initialize App Bridge (deferred to avoid blocking page load)
+            (function() {
+                try {
+                    var AppBridge = window['app-bridge'];
+                    if (AppBridge && AppBridge.default) {
+                        var host = new URLSearchParams(location.search).get('host');
+                        if (host) {
+                            window.shopifyApp = AppBridge.default({
+                                apiKey: '${process.env.SHOPIFY_API_KEY}',
+                                host: host,
+                            });
+                            console.log('✅ App Bridge initialized');
+                        }
+                    }
+                } catch (e) {
+                    console.warn('App Bridge init skipped:', e.message);
+                }
+            })();
+        </script>
       </body >
     </html >
                     `);
