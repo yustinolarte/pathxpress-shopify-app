@@ -6,6 +6,7 @@ import express from "express";
 import dotenv from "dotenv";
 import crypto from "crypto";
 import querystring from "querystring";
+import jwt from "jsonwebtoken";
 
 
 dotenv.config();
@@ -21,6 +22,67 @@ const db = mysql.createPool({
     password: process.env.DB_PASS,
     database: process.env.DB_NAME,
 });
+
+// ======================
+// HELPER: Verificar Session Token de Shopify
+// ======================
+function verifySessionToken(token) {
+    try {
+        // Decodificar sin verificar para obtener el header y ver el shop
+        const decoded = jwt.decode(token, { complete: true });
+        if (!decoded) {
+            console.error("❌ Session token could not be decoded");
+            return null;
+        }
+
+        // Verificar el token usando el API Secret como clave
+        const verified = jwt.verify(token, process.env.SHOPIFY_API_SECRET, {
+            algorithms: ['HS256']
+        });
+
+        // El payload contiene información del shop y usuario
+        // iss: https://{shop}.myshopify.com/admin
+        // dest: https://{shop}.myshopify.com
+        // sub: user ID
+        const shopDomain = verified.dest?.replace('https://', '').replace('http://', '') ||
+            verified.iss?.replace('https://', '').replace('/admin', '').replace('http://', '');
+
+        console.log("✅ Session token verified for shop:", shopDomain);
+
+        return {
+            shop: shopDomain,
+            userId: verified.sub,
+            exp: verified.exp,
+            iss: verified.iss,
+            dest: verified.dest
+        };
+    } catch (error) {
+        console.error("❌ Session token verification failed:", error.message);
+        return null;
+    }
+}
+
+// Middleware para proteger rutas con Session Token
+function requireSessionToken(req, res, next) {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        // Si no hay token, intentar con el método tradicional (para compatibilidad)
+        return next();
+    }
+
+    const token = authHeader.split(' ')[1];
+    const sessionData = verifySessionToken(token);
+
+    if (!sessionData) {
+        return res.status(401).json({ error: "Invalid session token" });
+    }
+
+    // Adjuntar datos de sesión al request
+    req.shopifySession = sessionData;
+    req.query.shop = sessionData.shop;
+    next();
+}
 
 // ======================
 // HELPER: Guardar shipment en MySQL (tabla shopify_shipments)
@@ -505,9 +567,11 @@ app.get("/", (req, res) => {
 // ======================
 // 4) PANTALLA PRINCIPAL /app
 // ======================
-app.get("/app", async (req, res) => {
-    const shop =
-        req.query.shop || req.headers["x-shopify-shop-domain"] || "";
+app.get("/app", requireSessionToken, async (req, res) => {
+    // Obtener shop de session token, query params, o header
+    const shop = req.shopifySession?.shop ||
+        req.query.shop ||
+        req.headers["x-shopify-shop-domain"] || "";
 
     if (!shop) {
         return res.status(400).send("Could not detect the shop.");
@@ -623,8 +687,31 @@ app.get("/app", async (req, res) => {
       <head>
         <meta charset="utf-8" />
         <title>PATHXPRESS Portal</title>
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+        <script>
+            // Inicializar App Bridge
+            var AppBridge = window['app-bridge'];
+            var createApp = AppBridge.default;
+            var app = createApp({
+                apiKey: '${process.env.SHOPIFY_API_KEY}',
+                host: new URLSearchParams(location.search).get('host'),
+            });
+            
+            // Función para hacer fetch autenticado con Session Token
+            async function authenticatedFetch(url, options = {}) {
+                const sessionToken = await app.getSessionToken();
+                return fetch(url, {
+                    ...options,
+                    headers: {
+                        ...options.headers,
+                        'Authorization': 'Bearer ' + sessionToken,
+                        'Content-Type': 'application/json'
+                    }
+                });
+            }
+        </script>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 25px; color: #333; }
             .card { background: white; border: 1px solid #dfe3e8; border-radius: 4px; padding: 20px; margin-bottom: 20px; box-shadow: 0 0 0 1px rgba(63, 63, 68, 0.05), 0 1px 3px 0 rgba(63, 63, 68, 0.15); }
@@ -808,7 +895,7 @@ app.get("/app", async (req, res) => {
                             feedback.style.background = '#f4f6f8';
                             feedback.innerHTML = '🔍 Verifying...';
                             try {
-                                const res = await fetch('/api/validate-client/' + id);
+                                const res = await authenticatedFetch('/api/validate-client/' + id);
                                 const data = await res.json();
                                 if (data.found) {
                                     feedback.style.background = '#d4edda';
@@ -916,7 +1003,7 @@ app.get("/app", async (req, res) => {
 // ======================
 // 4.0.1) API: Validate Client ID
 // ======================
-app.get("/api/validate-client/:id", async (req, res) => {
+app.get("/api/validate-client/:id", requireSessionToken, async (req, res) => {
     const clientId = req.params.id;
 
     try {
