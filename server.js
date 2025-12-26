@@ -715,24 +715,37 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 console.error('❌ App Bridge initialization error:', e);
             }
             
-            // Función para hacer fetch autenticado con Session Token (con fallback)
+            // Función para hacer fetch autenticado con Session Token (con timeout y fallback)
             async function authenticatedFetch(url, options = {}) {
+                // Helper para timeout
+                function withTimeout(promise, ms) {
+                    return Promise.race([
+                        promise,
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ms))
+                    ]);
+                }
+                
                 try {
                     if (app && appBridgeReady) {
-                        const sessionToken = await app.getSessionToken();
-                        return fetch(url, {
-                            ...options,
-                            headers: {
-                                ...options.headers,
-                                'Authorization': 'Bearer ' + sessionToken,
-                                'Content-Type': 'application/json'
-                            }
-                        });
+                        // Intentar obtener session token con timeout de 3 segundos
+                        const sessionToken = await withTimeout(app.getSessionToken(), 3000);
+                        if (sessionToken) {
+                            console.log('✅ Using authenticated fetch with session token');
+                            return fetch(url, {
+                                ...options,
+                                headers: {
+                                    ...options.headers,
+                                    'Authorization': 'Bearer ' + sessionToken,
+                                    'Content-Type': 'application/json'
+                                }
+                            });
+                        }
                     }
                 } catch (e) {
-                    console.warn('⚠️ Session token error, using regular fetch:', e);
+                    console.warn('⚠️ Session token error (will use regular fetch):', e.message);
                 }
                 // Fallback to regular fetch
+                console.log('📡 Using regular fetch');
                 return fetch(url, options);
             }
         </script>
