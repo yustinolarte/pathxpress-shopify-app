@@ -674,7 +674,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         <td>${new Date(row.createdAt).toLocaleDateString()}</td>
                         <td>
                             ${row.waybillNumber
-                            ? `<button class="print-btn" onclick='generateWaybillPDF(${shipmentData})'>🖨️ Print Label</button>`
+                            ? `<button class="print-btn" onclick='generateWaybillPDF(${shipmentData})'><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>Print Label</button>`
                             : '<span style="color: var(--text-muted);">Pending</span>'
                         }
                         </td>
@@ -698,6 +698,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+        <script src="https://unpkg.com/lucide@latest"></script>
         <style>
             :root {
                 --bg-primary: #0A1128;
@@ -1073,8 +1074,38 @@ app.get("/app", requireSessionToken, async (req, res) => {
             ::-webkit-scrollbar-thumb { background: var(--blue-electric); border-radius: 4px; }
             ::-webkit-scrollbar-thumb:hover { background: var(--red-neon); }
             
-            /* Icon styling */
-            .icon { display: inline-block; margin-right: 6px; }
+            /* Icon styling for Lucide Icons */
+            .icon { 
+                display: inline-flex; 
+                align-items: center;
+                justify-content: center;
+                margin-right: 8px;
+                vertical-align: middle;
+            }
+            .icon svg {
+                width: 20px;
+                height: 20px;
+                stroke-width: 2;
+            }
+            .icon-sm svg {
+                width: 16px;
+                height: 16px;
+            }
+            .icon-lg svg {
+                width: 24px;
+                height: 24px;
+            }
+            h1 .icon svg, h2 .icon svg {
+                width: 24px;
+                height: 24px;
+            }
+            button .icon {
+                margin-right: 6px;
+            }
+            button .icon svg {
+                width: 16px;
+                height: 16px;
+            }
         </style>
         <script>
             // City code mapping for UAE cities
@@ -1364,7 +1395,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
       </head>
       <body>
         <div class="card">
-            <h1>🚀 PATHXPRESS Portal</h1>
+            <h1><i data-lucide="rocket" class="icon"></i>PATHXPRESS Portal</h1>
             <p>Connected shop: <strong style="color: var(--text-primary);">${shop}</strong></p>
             ${isConnected ? '<span class="status-connected">Connected</span>' : '<span class="status-disconnected">Disconnected</span>'}
         </div>
@@ -1390,10 +1421,10 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
               <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                    <h2 style="margin:0;">⚙️ General Settings</h2>
+                    <h2 style="margin:0;"><i data-lucide="settings" class="icon"></i>General Settings</h2>
                     ${currentClientId ? `
-                        <button type="button" id="editBtn" onclick="toggleEditMode()" style="background:#5c6ac4; padding:8px 20px;">
-                            ✏️ Edit Settings
+                        <button type="button" id="editBtn" onclick="toggleEditMode()" class="btn-secondary">
+                            <i data-lucide="pencil" class="icon"></i>Edit Settings
                         </button>
                     ` : ''}
                 </div>
@@ -1415,7 +1446,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             const feedback = document.getElementById('clientFeedback');
                             feedback.style.display = 'block';
                             feedback.className = 'feedback-box feedback-info';
-                            feedback.innerHTML = '🔍 Verifying...';
+                            feedback.innerHTML = '<i data-lucide="search" class="icon icon-sm"></i>Verifying...';
                             
                             // Timeout controller
                             const controller = new AbortController();
@@ -1429,19 +1460,22 @@ app.get("/app", requireSessionToken, async (req, res) => {
                                 const data = await res.json();
                                 if (data.found) {
                                     feedback.className = 'feedback-box feedback-success';
-                                    feedback.innerHTML = '✅ <strong>' + data.companyName + '</strong> (Contact: ' + (data.contactName || 'N/A') + ')';
+                                    feedback.innerHTML = '<i data-lucide="check-circle" class="icon icon-sm"></i><strong>' + data.companyName + '</strong> (Contact: ' + (data.contactName || 'N/A') + ')';
+                                    lucide.createIcons();
                                 } else {
                                     feedback.className = 'feedback-box feedback-error';
-                                    feedback.innerHTML = '❌ Client ID not found. Please check and try again.';
+                                    feedback.innerHTML = '<i data-lucide="x-circle" class="icon icon-sm"></i>Client ID not found. Please check and try again.';
+                                    lucide.createIcons();
                                 }
                             } catch (e) {
                                 clearTimeout(timeoutId);
                                 feedback.className = 'feedback-box feedback-warning';
                                 if (e.name === 'AbortError') {
-                                    feedback.innerHTML = '⏱️ Verification timed out. Will save anyway.';
+                                    feedback.innerHTML = '<i data-lucide="clock" class="icon icon-sm"></i>Verification timed out. Will save anyway.';
                                 } else {
-                                    feedback.innerHTML = '⚠️ Could not verify. Will save anyway.';
+                                    feedback.innerHTML = '<i data-lucide="alert-triangle" class="icon icon-sm"></i>Could not verify. Will save anyway.';
                                 }
+                                lucide.createIcons();
                             }
                         }
                         // Auto-validate if there's a value on load
@@ -1457,19 +1491,21 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             
                             if (fieldset.disabled) {
                                 fieldset.disabled = false;
-                                editBtn.innerHTML = '❌ Cancel';
+                                editBtn.innerHTML = '<i data-lucide="x" class="icon"></i>Cancel';
                                 editBtn.className = 'btn-danger';
                                 saveBtn.style.display = 'inline-block';
+                                lucide.createIcons();
                             } else {
                                 fieldset.disabled = true;
-                                editBtn.innerHTML = '✏️ Edit Settings';
+                                editBtn.innerHTML = '<i data-lucide="pencil" class="icon"></i>Edit Settings';
                                 editBtn.className = 'btn-secondary';
+                                lucide.createIcons();
                                 saveBtn.style.display = 'none';
                             }
                         }
                     </script>
 
-                    <h3 style="margin-top:24px; font-size:16px;">🔍 Sync Filters</h3>
+                    <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="filter" class="icon icon-sm"></i>Sync Filters</h3>
                     <div class="settings-section">
                         <div class="checkbox-wrapper">
                             <input type="checkbox" name="auto_sync" value="1" ${currentAutoSync ? 'checked' : ''} />
@@ -1484,29 +1520,29 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         <p class="helper-text" style="margin-left:0;">If you enter a tag (e.g., "send_pathxpress"), ONLY orders with that tag in Shopify will be synced.</p>
                     </div>
 
-                    <h3 style="margin-top:24px; font-size:16px;">🚚 Default Shipping Service</h3>
+                    <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="truck" class="icon icon-sm"></i>Default Shipping Service</h3>
                     <p style="font-size:13px; margin-bottom:12px;">Select the default PathXpress service type for all orders from this store.</p>
                     
                     <div class="settings-section">
                         <select name="default_service_type" id="default_service_type">
-                            <option value="DOM" ${currentServiceType === 'DOM' ? 'selected' : ''}>🏠 DOM - Domestic Standard (1-2 days)</option>
-                            <option value="SAMEDAY" ${currentServiceType === 'SAMEDAY' ? 'selected' : ''}>⚡ SAMEDAY - Same Day Express</option>
-                            <option value="NEXTDAY" ${currentServiceType === 'NEXTDAY' ? 'selected' : ''}>📦 NEXTDAY - Next Day Delivery</option>
+                            <option value="DOM" ${currentServiceType === 'DOM' ? 'selected' : ''}>DOM - Domestic Standard (1-2 days)</option>
+                            <option value="SAMEDAY" ${currentServiceType === 'SAMEDAY' ? 'selected' : ''}>SAMEDAY - Same Day Express</option>
+                            <option value="NEXTDAY" ${currentServiceType === 'NEXTDAY' ? 'selected' : ''}>NEXTDAY - Next Day Delivery</option>
                         </select>
                     </div>
                     
-                    <h3 style="margin-top:24px; font-size:16px;">🎁 Free Shipping</h3>
+                    <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="gift" class="icon icon-sm"></i>Free Shipping</h3>
                     <p style="font-size:13px; margin-bottom:12px;">Set minimum order amounts for free shipping. Leave empty to disable.</p>
                     
                     <div class="settings-section grid-2">
                         <div>
-                            <label for="free_shipping_dom">📦 Standard (DOM):</label>
+                            <label for="free_shipping_dom"><i data-lucide="package" class="icon icon-sm"></i>Standard (DOM):</label>
                             <input type="number" step="0.01" min="0" id="free_shipping_dom" name="free_shipping_dom" 
                                    placeholder="e.g., 200" value="${freeShippingDOM}" />
                             <p class="helper-text" style="margin-left:0;">1-2 day delivery</p>
                         </div>
                         <div>
-                            <label for="free_shipping_express">⚡ Express (Same Day):</label>
+                            <label for="free_shipping_express"><i data-lucide="zap" class="icon icon-sm"></i>Express (Same Day):</label>
                             <input type="number" step="0.01" min="0" id="free_shipping_express" name="free_shipping_express" 
                                    placeholder="e.g., 500" value="${freeShippingExpress}" />
                             <p class="helper-text" style="margin-left:0;">Same day delivery</p>
@@ -1520,7 +1556,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
               </div>
 
               <div class="card">
-                <h2>📦 My PathXpress Shipments</h2>
+                <h2><i data-lucide="package" class="icon"></i>My PathXpress Shipments</h2>
                 <p style="margin-bottom:16px;">Last 20 processed shipments.</p>
                 <table>
                     <thead>
@@ -1540,9 +1576,9 @@ app.get("/app", requireSessionToken, async (req, res) => {
             `
             : `
               <div class="card" style="text-align:center; padding:40px;">
-                <h2 style="justify-content:center;">🔗 Connect Your Store</h2>
+                <h2 style="justify-content:center;"><i data-lucide="link" class="icon"></i>Connect Your Store</h2>
                 <p style="margin-bottom:24px;">To start using PathXpress shipping, connect your Shopify store.</p>
-                <a href="/auth?shop=${shop}" target="_top" style="display:inline-block; background:linear-gradient(135deg, var(--blue-electric), #1e5ad4); color:white; padding:14px 28px; text-decoration:none; border-radius:10px; font-weight:600; box-shadow:0 4px 15px rgba(45, 108, 246, 0.3); transition:all 0.3s ease;">🚀 Connect now</a>
+                <a href="/auth?shop=${shop}" target="_top" style="display:inline-flex; align-items:center; gap:8px; background:linear-gradient(135deg, var(--blue-electric), #1e5ad4); color:white; padding:14px 28px; text-decoration:none; border-radius:10px; font-weight:600; box-shadow:0 4px 15px rgba(45, 108, 246, 0.3); transition:all 0.3s ease;"><i data-lucide="rocket" style="width:18px;height:18px;"></i>Connect now</a>
               </div>
             `
         }
@@ -1568,6 +1604,14 @@ app.get("/app", requireSessionToken, async (req, res) => {
                     console.warn('App Bridge init skipped:', e.message);
                 }
             })();
+        </script>
+        <script>
+            // Initialize Lucide Icons
+            document.addEventListener('DOMContentLoaded', function() {
+                if (typeof lucide !== 'undefined') {
+                    lucide.createIcons();
+                }
+            });
         </script>
       </body >
     </html >
