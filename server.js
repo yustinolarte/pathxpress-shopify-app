@@ -692,8 +692,9 @@ app.get("/app", requireSessionToken, async (req, res) => {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>PATHXPRESS Portal</title>
-        <!-- Shopify App Bridge - Required in head for embedded apps -->
-        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" data-api-key="${process.env.SHOPIFY_API_KEY}"></script>
+        <!-- Shopify App Bridge - Meta tag MUST be before the script -->
+        <meta name="shopify-api-key" content="${process.env.SHOPIFY_API_KEY}" />
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
@@ -1471,7 +1472,21 @@ app.get("/app", requireSessionToken, async (req, res) => {
                     </div>
                     <div id="clientFeedback" class="feedback-box feedback-info" style="display:none;"></div>
                     <script>
-                        function validateClientId(id) {
+                        // Helper to get session token from App Bridge
+                        async function getSessionToken() {
+                            try {
+                                if (window.shopify && typeof window.shopify.idToken === 'function') {
+                                    const token = await window.shopify.idToken();
+                                    console.log('✅ Got session token from App Bridge');
+                                    return token;
+                                }
+                            } catch (e) {
+                                console.warn('Could not get session token:', e.message);
+                            }
+                            return null;
+                        }
+                        
+                        async function validateClientId(id) {
                             if (!id) return;
                             const feedback = document.getElementById('clientFeedback');
                             feedback.style.display = 'block';
@@ -1485,46 +1500,43 @@ app.get("/app", requireSessionToken, async (req, res) => {
                                 document.head.appendChild(style);
                             }
                             
-                            // Use XMLHttpRequest to avoid App Bridge fetch interception
-                            var xhr = new XMLHttpRequest();
-                            xhr.open('GET', '/api/validate-client/' + id, true);
-                            xhr.timeout = 10000;
-                            xhr.onreadystatechange = function() {
-                                if (xhr.readyState === 4) {
-                                    if (xhr.status === 200) {
-                                        try {
-                                            var data = JSON.parse(xhr.responseText);
-                                            if (data.found) {
-                                                feedback.className = 'feedback-box feedback-success';
-                                                feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg><strong>' + data.companyName + '</strong> (Contact: ' + (data.contactName || 'N/A') + ')';
-                                            } else {
-                                                feedback.className = 'feedback-box feedback-error';
-                                                feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>Client ID not found. Please check and try again.';
-                                            }
-                                        } catch (e) {
-                                            feedback.className = 'feedback-box feedback-warning';
-                                            feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Parse error. Will save anyway.';
-                                        }
-                                    } else {
-                                        feedback.className = 'feedback-box feedback-warning';
-                                        feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Could not verify. Will save anyway.';
-                                    }
+                            try {
+                                // Get session token from App Bridge
+                                const sessionToken = await getSessionToken();
+                                
+                                // Make request with session token in Authorization header
+                                const headers = {};
+                                if (sessionToken) {
+                                    headers['Authorization'] = 'Bearer ' + sessionToken;
                                 }
-                            };
-                            xhr.ontimeout = function() {
+                                
+                                const response = await fetch('/api/validate-client/' + id, {
+                                    method: 'GET',
+                                    headers: headers
+                                });
+                                
+                                const data = await response.json();
+                                
+                                if (data.found) {
+                                    feedback.className = 'feedback-box feedback-success';
+                                    feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg><strong>' + data.companyName + '</strong> (Contact: ' + (data.contactName || 'N/A') + ')';
+                                } else {
+                                    feedback.className = 'feedback-box feedback-error';
+                                    feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>Client ID not found. Please check and try again.';
+                                }
+                            } catch (e) {
+                                console.error('Validation error:', e);
                                 feedback.className = 'feedback-box feedback-warning';
-                                feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Verification timed out. Will save anyway.';
-                            };
-                            xhr.onerror = function() {
-                                feedback.className = 'feedback-box feedback-warning';
-                                feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Network error. Will save anyway.';
-                            };
-                            xhr.send();
+                                feedback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>Could not verify. Will save anyway.';
+                            }
                         }
-                        // Auto-validate if there's a value on load
-                        if (document.getElementById('clientId').value) {
-                            validateClientId(document.getElementById('clientId').value);
-                        }
+                        
+                        // Auto-validate if there's a value on load (with delay to let App Bridge initialize)
+                        setTimeout(function() {
+                            if (document.getElementById('clientId').value) {
+                                validateClientId(document.getElementById('clientId').value);
+                            }
+                        }, 1000);
                         
                         // Toggle edit mode
                         function toggleEditMode() {
