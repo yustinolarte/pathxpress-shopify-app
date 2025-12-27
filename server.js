@@ -40,6 +40,13 @@ function verifySessionToken(token) {
             algorithms: ['HS256']
         });
 
+        // Verificar que el audience (aud) coincida con nuestro Client ID
+        const expectedAud = process.env.SHOPIFY_API_KEY;
+        if (verified.aud && verified.aud !== expectedAud) {
+            console.error("❌ Session token aud mismatch:", verified.aud, "expected:", expectedAud);
+            return null;
+        }
+
         // El payload contiene información del shop y usuario
         // iss: https://{shop}.myshopify.com/admin
         // dest: https://{shop}.myshopify.com
@@ -54,7 +61,8 @@ function verifySessionToken(token) {
             userId: verified.sub,
             exp: verified.exp,
             iss: verified.iss,
-            dest: verified.dest
+            dest: verified.dest,
+            aud: verified.aud
         };
     } catch (error) {
         console.error("❌ Session token verification failed:", error.message);
