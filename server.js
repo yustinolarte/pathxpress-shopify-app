@@ -1482,18 +1482,71 @@ app.get("/app", requireSessionToken, async (req, res) => {
                     <script>
                         // Helper to get session token from App Bridge
                         async function getSessionToken() {
-                            try {
-                                if (window.shopify && typeof window.shopify.idToken === 'function') {
-                                    const token = await window.shopify.idToken();
-                                    console.log('✅ Got session token from App Bridge');
-                                    return token;
+                            if (window.shopify && window.shopify.id && window.shopify.id.getSessionToken) {
+                                try {
+                                    return await window.shopify.id.getSessionToken();
+                                } catch (err) {
+                                    console.warn('Error fetching session token:', err);
                                 }
-                            } catch (e) {
-                                console.warn('Could not get session token:', e.message);
                             }
                             return null;
                         }
                         
+                        // Handle Form Submit with Session Token
+                        document.addEventListener('DOMContentLoaded', () => {
+                            const form = document.getElementById('settingsForm');
+                            if (form) {
+                                form.addEventListener('submit', async (e) => {
+                                    e.preventDefault();
+                                    const btn = document.getElementById('saveBtn');
+                                    const originalText = btn.innerHTML;
+                                    btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Saving...</span>';
+                                    btn.disabled = true;
+
+                                    try {
+                                        const token = await getSessionToken();
+                                        const formData = new FormData(form);
+                                        const data = Object.fromEntries(formData.entries());
+                                        
+                                        const headers = {
+                                            'Content-Type': 'application/json'
+                                        };
+                                        if (token) {
+                                            // Fix: Use concatenation to avoid server-side interpolation of backticks
+                                            headers['Authorization'] = 'Bearer ' + token;
+                                        }
+
+                                        const res = await fetch('/app/save-settings', {
+                                            method: 'POST',
+                                            headers: headers,
+                                            body: JSON.stringify(data)
+                                        });
+                                        
+                                        let result;
+                                        try {
+                                            result = await res.json();
+                                        } catch (e) {
+                                            result = { success: false, message: 'Server error' };
+                                        }
+                                        
+                                        if (res.ok && result.success) {
+                                            // Success - reload to show saved state
+                                            window.location.reload(); 
+                                        } else {
+                                            alert('Error: ' + (result.message || 'Unknown error'));
+                                            btn.innerHTML = originalText;
+                                            btn.disabled = false;
+                                        }
+                                    } catch (err) {
+                                        console.error(err);
+                                        alert('Failed to save settings. Please try again.');
+                                        btn.innerHTML = originalText;
+                                        btn.disabled = false;
+                                    }
+                                });
+                            }
+                        });
+
                         async function validateClientId(id) {
                             if (!id) return;
                             const feedback = document.getElementById('clientFeedback');
@@ -1646,18 +1699,18 @@ app.get("/app", requireSessionToken, async (req, res) => {
             `
         }
         
-        <!-- App Bridge initialized in head -->
-        <script>
+        < !--App Bridge initialized in head-- >
+<script>
             // Initialize Lucide Icons
-            document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function() {
                 if (typeof lucide !== 'undefined') {
-                    lucide.createIcons();
+        lucide.createIcons();
                 }
             });
-        </script>
+</script>
       </body >
     </html >
-                    `);
+    `);
 });
 
 // ======================
@@ -1693,14 +1746,27 @@ app.get("/api/validate-client/:id", async (req, res) => {
 // ======================
 // 4.1) GUARDAR CONFIGURACIÓN
 // ======================
-app.post("/app/save-settings", express.urlencoded({ extended: true }), async (req, res) => {
-    const { shop, clientId, default_service_type, auto_sync, sync_tag, free_shipping_dom, free_shipping_express } = req.body;
+app.post("/app/save-settings", requireSessionToken, async (req, res) => {
+    // 1. Validar autenticación vía Session Token
+    const session = req.shopifySession;
+    let shop = session ? session.shop : null;
 
-    if (!shop || !clientId) {
-        return res.send("Error: Missing data. Please provide a Client ID.");
+    // Fallback para dev/pruebas (si se envía por body, aunque inseguro)
+    if (!shop && req.body.shop) {
+        shop = req.body.shop;
     }
 
-    const isAutoSync = auto_sync === "1" ? 1 : 0;
+    if (!shop) {
+        return res.status(401).json({ success: false, message: "Unauthorized: Missing shop or valid session." });
+    }
+
+    const { clientId, default_service_type, auto_sync, sync_tag, free_shipping_dom, free_shipping_express } = req.body;
+
+    if (!clientId) {
+        return res.status(400).json({ success: false, message: "Error: Missing Client ID." });
+    }
+
+    const isAutoSync = auto_sync === "1" || auto_sync === true ? 1 : 0;
     const serviceType = default_service_type || "DOM";
     const freeShippingDOMValue = free_shipping_dom && parseFloat(free_shipping_dom) > 0
         ? parseFloat(free_shipping_dom)
@@ -1712,23 +1778,25 @@ app.post("/app/save-settings", express.urlencoded({ extended: true }), async (re
     try {
         // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            `INSERT INTO shopify_shops (shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express)
+             VALUES(?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 pathxpress_client_id = VALUES(pathxpress_client_id),
-                default_service_type = VALUES(default_service_type),
-                auto_sync = VALUES(auto_sync),
-                sync_tag = VALUES(sync_tag),
-                free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
-                free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
-                updated_at = CURRENT_TIMESTAMP`,
+    default_service_type = VALUES(default_service_type),
+    auto_sync = VALUES(auto_sync),
+    sync_tag = VALUES(sync_tag),
+    free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
+    free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
+    updated_at = CURRENT_TIMESTAMP`,
             [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingDOMValue, freeShippingExpressValue]
         );
-        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync}, FreeDOM = ${freeShippingDOMValue}, FreeExpress = ${freeShippingExpressValue}`);
-        res.redirect(`/app?shop=${shop}`);
+        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync} `);
+
+        // Return JSON success
+        res.json({ success: true, message: "Settings saved successfully" });
     } catch (err) {
         console.error("Error saving settings:", err);
-        res.send("Error saving settings. Please try again.");
+        res.status(500).json({ success: false, message: "Internal server error saving settings." });
     }
 });
 
@@ -1754,7 +1822,7 @@ app.post("/api/shipping-rates", async (req, res) => {
             if (shopMatch) shop = shopMatch[1];
         }
 
-        console.log(`Store detected: ${shop}`);
+        console.log(`Store detected: ${shop} `);
 
         if (!shop) {
             console.warn("⚠️ Could not detect shop domain, using default rates");
@@ -1773,7 +1841,7 @@ app.post("/api/shipping-rates", async (req, res) => {
         // 4. Obtener cliente con todas sus tarifas
         const [clientRows] = await db.execute(
             `SELECT manualRateTierId, customDomBaseRate, customDomPerKg, customSddBaseRate, customSddPerKg 
-             FROM clientAccounts WHERE id = ?`,
+             FROM clientAccounts WHERE id = ? `,
             [clientId]
         );
 
@@ -1789,7 +1857,7 @@ app.post("/api/shipping-rates", async (req, res) => {
         const totalWeightGrams = items.reduce((sum, item) => sum + (item.grams || 0) * (item.quantity || 1), 0);
         const totalWeightKg = Math.ceil(totalWeightGrams / 1000) || 1; // Redondear hacia arriba, mínimo 1kg
 
-        console.log(`📦 Calculating rates for client ${clientId}, weight: ${totalWeightKg}kg`);
+        console.log(`📦 Calculating rates for client ${clientId}, weight: ${totalWeightKg} kg`);
 
         let domPrice, sddPrice;
 
@@ -1799,7 +1867,7 @@ app.post("/api/shipping-rates", async (req, res) => {
             const perKgRate = parseFloat(client.customDomPerKg);
             // Fórmula: baseRate cubre hasta 5kg, luego +perKgRate por cada kg adicional
             domPrice = baseRate + (Math.max(0, totalWeightKg - 5) * perKgRate);
-            console.log(`💰 DOM using custom rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${domPrice}`);
+            console.log(`💰 DOM using custom rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${domPrice} `);
         } else {
             // Fallback a rate tiers si no tiene tarifas personalizadas
             domPrice = await calculateFromTiers(db, client.manualRateTierId, clientId, 'DOM', totalWeightKg);
@@ -1809,7 +1877,7 @@ app.post("/api/shipping-rates", async (req, res) => {
             const baseRate = parseFloat(client.customSddBaseRate);
             const perKgRate = parseFloat(client.customSddPerKg);
             sddPrice = baseRate + (Math.max(0, totalWeightKg - 5) * perKgRate);
-            console.log(`💰 SDD using custom rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${sddPrice}`);
+            console.log(`💰 SDD using custom rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${sddPrice} `);
         } else {
             // Fallback a rate tiers
             sddPrice = await calculateFromTiers(db, client.manualRateTierId, clientId, 'SDD', totalWeightKg);
@@ -1830,7 +1898,7 @@ app.post("/api/shipping-rates", async (req, res) => {
         let isDOMFree = false;
         let isExpressFree = false;
 
-        console.log(`🔧 Free shipping thresholds - DOM: ${freeShippingDOM}, Express: ${freeShippingExpress}`);
+        console.log(`🔧 Free shipping thresholds - DOM: ${freeShippingDOM}, Express: ${freeShippingExpress} `);
 
         // Calcular precio total de los productos
         const totalItemsPrice = items.reduce((sum, item) => {
@@ -1854,7 +1922,7 @@ app.post("/api/shipping-rates", async (req, res) => {
             console.log(`🎁 FREE EXPRESS shipping! ${totalItemsPrice} AED >= ${freeShippingExpress} AED`);
         }
 
-        console.log(`💵 Final rates - DOM: ${domPrice} AED${isDOMFree ? ' (FREE!)' : ''}, SDD: ${sddPrice} AED${isExpressFree ? ' (FREE!)' : ''}`);
+        console.log(`💵 Final rates - DOM: ${domPrice} AED${isDOMFree ? ' (FREE!)' : ''}, SDD: ${sddPrice} AED${isExpressFree ? ' (FREE!)' : ''} `);
 
         // 8. Respuesta formato Shopify
         const response = {
@@ -1895,17 +1963,17 @@ async function calculateFromTiers(db, manualTierId, clientId, serviceType, weigh
             const [volumeRows] = await db.execute(`
                 SELECT COUNT(*) as shipmentCount 
                 FROM orders 
-                WHERE clientId = ? 
-                AND createdAt >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
-            `, [clientId]);
+                WHERE clientId = ?
+    AND createdAt >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+        `, [clientId]);
 
             const monthlyVolume = volumeRows[0]?.shipmentCount || 0;
 
             const [tierRows] = await db.execute(`
                 SELECT id FROM rateTiers 
-                WHERE serviceType = ? 
-                AND minVolume <= ? 
-                AND (maxVolume IS NULL OR maxVolume >= ?)
+                WHERE serviceType = ?
+    AND minVolume <= ?
+        AND(maxVolume IS NULL OR maxVolume >= ?)
                 AND isActive = 1
                 ORDER BY minVolume DESC 
                 LIMIT 1
@@ -1997,7 +2065,7 @@ app.get("/auth", (req, res) => {
     if (!shop) return res.status(400).send("Missing shop parameter.");
 
     const scopes = process.env.SCOPES;
-    const redirectUri = `${process.env.APP_URL}/auth/callback`;
+    const redirectUri = `${process.env.APP_URL} /auth/callback`;
     const clientId = process.env.SHOPIFY_API_KEY;
 
     console.log("🔐 Starting OAuth...");
@@ -2337,6 +2405,49 @@ async function processRetryQueue() {
 }
 
 // ======================
+// HELPER: Calcular Tarifas desde Tiers
+// ======================
+async function calculateFromTiers_DISABLED(db, tierId, clientId, serviceCode, weightKg) {
+    // Default fallback values
+    const isSdd = serviceCode === 'SDD' || serviceCode === 'SAMEDAY';
+    const defaultBase = isSdd ? 25 : 15;
+    const defaultPerKg = isSdd ? 3 : 2;
+
+    if (!tierId) {
+        return defaultBase + (Math.max(0, weightKg - 5) * defaultPerKg);
+    }
+
+    try {
+        // Intentamos leer de rateTiers
+        // NOTA: Ajustar nombres de columnas según schema real. 
+        // Se asume: sddBasePrice, sddPerKg, domBasePrice, domPerKg
+        const [rows] = await db.execute("SELECT * FROM rateTiers WHERE id = ?", [tierId]);
+
+        if (rows.length === 0) {
+            console.warn(`⚠️ Rate Tier ${tierId} not found, using defaults.`);
+            return defaultBase + (Math.max(0, weightKg - 5) * defaultPerKg);
+        }
+
+        const tier = rows[0];
+
+        const base = isSdd
+            ? (parseFloat(tier.sddBasePrice || tier.sdd_base_price || 25))
+            : (parseFloat(tier.domBasePrice || tier.dom_base_price || 15));
+
+        const perKg = isSdd
+            ? (parseFloat(tier.sddPerKg || tier.sdd_per_kg || 3))
+            : (parseFloat(tier.domPerKg || tier.dom_per_kg || 2));
+
+        const price = base + (Math.max(0, weightKg - 5) * perKg);
+        return price;
+
+    } catch (e) {
+        console.error("⛔ Error calculating from tiers:", e);
+        return defaultBase + (Math.max(0, weightKg - 5) * defaultPerKg);
+    }
+}
+
+// ======================
 // 10) LOGICA DE SINCRONIZACIÓN (Two-Way Sync)
 // ======================
 async function syncShipmentsToShopify() {
@@ -2348,7 +2459,7 @@ async function syncShipmentsToShopify() {
         //    - Su estado en la tabla `orders` sea 'PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY' o 'DELIVERED'
         //      (Asumimos que PENDING_PICKUP no se sincroniza aún)
 
-        // Hacemos JOIN con `orders` usando orderNumber y shipperName (shop_domain)
+        // Hacemos JOIN con `shopify_shops` para obtener el clientId, y luego con `orders`
         const [rows] = await db.execute(`
             SELECT 
                 s.id AS shipment_id,
@@ -2358,7 +2469,8 @@ async function syncShipmentsToShopify() {
                 o.waybillNumber,
                 o.status AS current_status
             FROM shopify_shipments s
-            JOIN orders o ON (o.orderNumber = s.shop_order_name AND o.shipperName = s.shop_domain)
+            JOIN shopify_shops ss ON ss.shop_domain = s.shop_domain
+            JOIN orders o ON (o.orderNumber = s.shop_order_name AND o.clientId = ss.pathxpress_client_id)
             WHERE s.shopify_fulfillment_id IS NULL
               AND o.status IN ('PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED')
             LIMIT 10
@@ -2389,36 +2501,8 @@ async function fulfillShopifyOrder(row) {
         }
         const accessToken = shopData.access_token;
 
-        // 2. Obtener Location ID (necesario para fulfillment)
-        //    Pedimos las locations y usamos la primera (normalmente el almacén principal)
-        const locRes = await fetch(`https://${shop_domain}/admin/api/2024-07/locations.json`, {
-            headers: { "X-Shopify-Access-Token": accessToken }
-        });
-        const locJson = await locRes.json();
-        const locationId = locJson.locations?.[0]?.id;
-
-        if (!locationId) {
-            console.error(`⚠️ Location ID not found for ${shop_domain}`);
-            return;
-        }
-
-        // 3. Crear Fulfillment en Shopify
-        //    Incluimos tracking info
-        const payload = {
-            fulfillment: {
-                location_id: locationId,
-                tracking_info: {
-                    number: waybillNumber,
-                    url: `https://pathxpress.net/tracking?id=${waybillNumber}`,
-                    company: "PathXpress"
-                },
-                // line_items_by_fulfillment_order: ... (Si es API nueva 2024, a veces pide fulfillment_order_id)
-                // Para simplificar usamos el endpoint legacy de orders/{id}/fulfillments si aún funciona,
-                // o el nuevo flujo. La API 2024-07 prefiere fulfillment_orders.
-                // Vamos a intentar el método "Fulfillment on Order" legacy que suele redirigir, 
-                // o mejor: Buscamos las fulfillment_orders abiertas y cerramos la primera.
-            }
-        };
+        // 2. Crear Fulfillment en Shopify
+        //    (Ya no necesitamos location_id explícito si usamos fulfillment_orders)
 
         // NOTA: Desde 2023, Shopify deprecó POST /orders/{id}/fulfillments.
         // Hay que usar POST /fulfillments.json con `line_items_by_fulfillment_order`.
