@@ -2065,7 +2065,7 @@ app.get("/auth", (req, res) => {
     if (!shop) return res.status(400).send("Missing shop parameter.");
 
     const scopes = process.env.SCOPES;
-    const redirectUri = `${process.env.APP_URL} /auth/callback`;
+    const redirectUri = `${process.env.APP_URL}/auth/callback`;
     const clientId = process.env.SHOPIFY_API_KEY;
 
     console.log("🔐 Starting OAuth...");
