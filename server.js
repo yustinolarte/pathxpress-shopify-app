@@ -309,6 +309,34 @@ async function saveShipmentToOrdersTable(shipment) {
 // ======================
 async function saveShopToDB(shopDomain, accessToken, shopData) {
     try {
+        // Check if shop already exists (reinstall case)
+        const [existingRows] = await db.execute(
+            "SELECT pathxpress_client_id, auto_sync, sync_tag, default_service_type, free_shipping_threshold_dom, free_shipping_threshold_express FROM shopify_shops WHERE shop_domain = ?",
+            [shopDomain]
+        );
+
+        const isReinstall = existingRows.length > 0;
+
+        if (isReinstall) {
+            const existing = existingRows[0];
+            console.log(`🔄 REINSTALL DETECTED for ${shopDomain}`);
+            console.log(`   Preserving configuration:`);
+            console.log(`   - pathxpress_client_id: ${existing.pathxpress_client_id || 'NOT SET'}`);
+            console.log(`   - auto_sync: ${existing.auto_sync}`);
+            console.log(`   - sync_tag: ${existing.sync_tag || 'none'}`);
+            console.log(`   - default_service_type: ${existing.default_service_type}`);
+            console.log(`   - free_shipping_threshold_dom: ${existing.free_shipping_threshold_dom || 'none'}`);
+            console.log(`   - free_shipping_threshold_express: ${existing.free_shipping_threshold_express || 'none'}`);
+
+            // Warn if client ID is not set - this will cause shipping rates to fail
+            if (!existing.pathxpress_client_id) {
+                console.warn(`⚠️ WARNING: Shop ${shopDomain} does NOT have a PathXpress Client ID configured!`);
+                console.warn(`   Shipping rates will use default values until Client ID is set in the app settings.`);
+            }
+        }
+
+        // SQL preserves existing config fields (pathxpress_client_id, auto_sync, etc.)
+        // because they are NOT included in the ON DUPLICATE KEY UPDATE clause
         const sql = `
             INSERT INTO shopify_shops (
                 shop_domain, access_token, shop_name, email, phone,
@@ -340,7 +368,7 @@ async function saveShopToDB(shopDomain, accessToken, shopData) {
             shopData.country,
             shopData.zip
         ]);
-        console.log(`💾 Shop ${shopDomain} saved/updated in DB.`);
+        console.log(`💾 Shop ${shopDomain} ${isReinstall ? 'updated (reinstall)' : 'saved (new install)'} in DB.`);
     } catch (err) {
         console.error("⛔ Error saving shop to DB:", err);
     }
@@ -585,7 +613,17 @@ app.get("/app", requireSessionToken, async (req, res) => {
         return res.status(400).send("Could not detect the shop.");
     }
 
-    const isConnected = Boolean(shopsTokens[shop]);
+    // First, try to get shop data from DB to check if it's actually connected
+    // (tokens in memory are lost on server restart, but DB persists)
+    let shopData = await getShopFromDB(shop);
+
+    // If shop exists in DB with access_token, restore to memory and consider connected
+    if (shopData && shopData.access_token && !shopsTokens[shop]) {
+        console.log(`🔄 Restoring token for ${shop} from DB to memory`);
+        shopsTokens[shop] = shopData.access_token;
+    }
+
+    const isConnected = Boolean(shopsTokens[shop] || (shopData && shopData.access_token));
 
     // Obtener configuración actual de la DB
     let currentClientId = "";
@@ -596,11 +634,10 @@ app.get("/app", requireSessionToken, async (req, res) => {
     let freeShippingExpress = ""; // Umbral para envío gratis Express
     let shipmentsRows = "<tr><td colspan='5'>No recent shipments.</td></tr>";
     let metrics = { todayCount: 0, activeCount: 0, pendingCod: 0 };
-    let shopData = null;
+
 
     if (isConnected) {
-        // 1. Obtener datos de la tienda (Client ID)
-        shopData = await getShopFromDB(shop);
+        // 1. Usar datos de la tienda ya obtenidos (Client ID, settings)
         if (shopData) {
             currentClientId = shopData.pathxpress_client_id;
             currentAutoSync = shopData.auto_sync !== 0; // MySQL boolean is 0/1
@@ -2287,7 +2324,8 @@ async function registerCarrierService(shop, accessToken) {
     const apiVersion = "2024-07";
     const callbackUrl = `${process.env.APP_URL}/api/shipping-rates`;
 
-    console.log("🚚 Registering CarrierService in:", shop);
+    console.log("🚚 Registering/Verifying CarrierService in:", shop);
+    console.log("🔗 Callback URL:", callbackUrl);
 
     try {
         // 1. Verificar si ya existe
@@ -2298,12 +2336,56 @@ async function registerCarrierService(shop, accessToken) {
         const existing = (getData.carrier_services || []).find(cs => cs.name === "PathXpress Shipping");
 
         if (existing) {
-            console.log("✅ CarrierService already exists. ID:", existing.id);
-            // Opcional: Actualizar URL si cambió
+            console.log("🔄 CarrierService already exists. ID:", existing.id);
+            console.log("   Current callback_url:", existing.callback_url);
+            console.log("   Active:", existing.active);
+
+            // Update callback URL if it changed (reinstall with different domain)
+            if (existing.callback_url !== callbackUrl) {
+                console.log("🔧 Updating CarrierService callback_url...");
+                const updateRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services/${existing.id}.json`, {
+                    method: "PUT",
+                    headers: {
+                        "X-Shopify-Access-Token": accessToken,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        carrier_service: {
+                            id: existing.id,
+                            callback_url: callbackUrl,
+                            active: true
+                        }
+                    }),
+                });
+
+                if (updateRes.ok) {
+                    console.log("✅ CarrierService callback_url updated successfully!");
+                } else {
+                    const errJson = await updateRes.json();
+                    console.error("⚠️ Error updating CarrierService:", JSON.stringify(errJson));
+                }
+            } else if (!existing.active) {
+                // Reactivate if disabled
+                console.log("🔧 Reactivating CarrierService...");
+                await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services/${existing.id}.json`, {
+                    method: "PUT",
+                    headers: {
+                        "X-Shopify-Access-Token": accessToken,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        carrier_service: { id: existing.id, active: true }
+                    }),
+                });
+                console.log("✅ CarrierService reactivated!");
+            } else {
+                console.log("✅ CarrierService is correctly configured and active.");
+            }
             return;
         }
 
         // 2. Crear si no existe
+        console.log("📦 Creating new CarrierService...");
         const response = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services.json`, {
             method: "POST",
             headers: {
