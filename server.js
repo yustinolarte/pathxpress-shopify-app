@@ -2460,9 +2460,11 @@ app.get("/debug/carrier/:shop", async (req, res) => {
     }
 });
 
-// Endpoint para FORZAR re-registro del Carrier Service
+// Endpoint para FORZAR re-registro del Carrier Service (con diagnóstico completo)
 app.get("/fix/carrier/:shop", async (req, res) => {
     const shop = req.params.shop;
+    const apiVersion = "2024-07";
+    const callbackUrl = `${process.env.APP_URL}/api/shipping-rates`;
 
     try {
         const shopData = await getShopFromDB(shop);
@@ -2475,17 +2477,89 @@ app.get("/fix/carrier/:shop", async (req, res) => {
             });
         }
 
-        // Forzar re-registro
-        await registerCarrierService(shop, shopData.access_token);
+        const accessToken = shopData.access_token;
 
-        res.json({
-            success: true,
-            message: `Carrier Service re-registered for ${shop}`,
-            shop,
-            next_step: "Go to checkout and test rates"
+        // 1. Primero verificar si ya existe
+        const getRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services.json`, {
+            headers: { "X-Shopify-Access-Token": accessToken }
         });
+        const getResText = await getRes.text();
+
+        let existingData;
+        try {
+            existingData = JSON.parse(getResText);
+        } catch (e) {
+            return res.json({
+                success: false,
+                error: "Invalid response from Shopify when checking existing carriers",
+                shop,
+                response_status: getRes.status,
+                response_body: getResText
+            });
+        }
+
+        const existing = (existingData.carrier_services || []).find(cs => cs.name === "PathXpress Shipping");
+
+        if (existing) {
+            // Ya existe, intentar reactivar/actualizar
+            const updateRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services/${existing.id}.json`, {
+                method: "PUT",
+                headers: {
+                    "X-Shopify-Access-Token": accessToken,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    carrier_service: {
+                        id: existing.id,
+                        callback_url: callbackUrl,
+                        active: true
+                    }
+                }),
+            });
+
+            const updateResText = await updateRes.text();
+
+            return res.json({
+                success: updateRes.ok,
+                action: "UPDATED",
+                message: updateRes.ok ? "Carrier Service updated and activated!" : "Failed to update",
+                shop,
+                carrier_id: existing.id,
+                response_status: updateRes.status,
+                response_body: updateResText
+            });
+        }
+
+        // 2. Crear nuevo Carrier Service
+        const createRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services.json`, {
+            method: "POST",
+            headers: {
+                "X-Shopify-Access-Token": accessToken,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                carrier_service: {
+                    name: "PathXpress Shipping",
+                    callback_url: callbackUrl,
+                    service_discovery: true
+                }
+            }),
+        });
+
+        const createResText = await createRes.text();
+
+        return res.json({
+            success: createRes.ok,
+            action: "CREATED",
+            message: createRes.ok ? "Carrier Service created successfully!" : "Failed to create",
+            shop,
+            callback_url: callbackUrl,
+            response_status: createRes.status,
+            response_body: createResText
+        });
+
     } catch (err) {
-        res.json({ success: false, error: err.message, shop });
+        res.json({ success: false, error: err.message, shop, stack: err.stack });
     }
 });
 
