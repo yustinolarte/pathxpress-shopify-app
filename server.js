@@ -2806,10 +2806,24 @@ async function setupFixedRates(shop, accessToken) {
                     }
                 })
             });
-            const createZoneData = await createZoneRes.json();
+            const responseText = await createZoneRes.text();
+            console.log("Create Zone Response Status:", createZoneRes.status);
+            console.log("Create Zone Response Body:", responseText);
+
+            let createZoneData = {};
+            try {
+                if (responseText && responseText.trim().length > 0) {
+                    createZoneData = JSON.parse(responseText);
+                }
+            } catch (e) {
+                console.error("Failed to parse JSON:", e);
+                return { success: false, error: "Invalid response from Shopify: " + responseText };
+            }
+
             if (!createZoneRes.ok) {
-                console.error("Error creating zone:", JSON.stringify(createZoneData));
-                return { success: false, error: "Failed to create shipping zone for UAE" };
+                console.error("Error creating zone:", responseText);
+                const errorMsg = createZoneData.errors ? JSON.stringify(createZoneData.errors) : "Unknown error creating zone";
+                return { success: false, error: errorMsg };
             }
             uaeZone = createZoneData.shipping_zone;
         }
