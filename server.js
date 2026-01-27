@@ -1822,63 +1822,18 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 </div>
 
                 <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 15px;">
-                    <h3 style="margin:0 0 10px 0; font-size:16px;">Fixed Rates (Fallback)</h3>
+                    <h3 style="margin:0 0 10px 0; font-size:16px;">Manual Rates Configuration</h3>
                     <p style="font-size:13px; color:#aaa; margin-bottom:15px;">
-                        Use this if your Shopify plan doesn't support Carrier Calculated Shipping (Basic Plan).
-                        This will create "Standard Delivery" (15 AED) and "Express Delivery" (25 AED) in your shipping profile.
+                        If Dynamic Rates are <strong>Not Active</strong> (Basic Plan), you must manually configure your shipping rates in Shopify to match your contract with PathXpress.
                     </p>
-                    <button onclick="setupFixedRatesManual()" id="manualFixedBtn" class="btn-secondary" style="width:auto;">
-                        <i data-lucide="wrench" class="icon"></i> Configure Fixed Rates
-                    </button>
-                    <p id="manualFixedStatus" style="font-size:13px; margin-top:10px; display:none;"></p>
+                    <ol style="font-size:13px; color:#ccc; margin-bottom:0; padding-left:20px; line-height:1.6;">
+                        <li>Go to your Shopify Admin &rarr; <strong>Settings</strong> &rarr; <strong>Shipping and delivery</strong>.</li>
+                        <li>Click <strong>Manage</strong> next to your General shipping profile.</li>
+                        <li>Add your rates manually (e.g., "Standard Delivery") with the prices agreed upon in your contract as fixed rates.</li>
+                    </ol>
                 </div>
 
-                <script>
-                async function setupFixedRatesManual() {
-                    const btn = document.getElementById('manualFixedBtn');
-                    const status = document.getElementById('manualFixedStatus');
-                    const originalText = btn.innerHTML;
-                    
-                    btn.disabled = true;
-                    btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;">Configuring...</span>';
-                    status.style.display = 'block';
-                    status.textContent = 'Creating Shipping Zone and Rates in Shopify...';
-                    status.className = ''; 
-                    
-                    try {
-                        let token = await getSessionToken();
-                        
-                        const headers = { 'Content-Type': 'application/json' };
-                        if (token) headers['Authorization'] = 'Bearer ' + token;
 
-                        const res = await fetch('/app/setup-fixed-rates', { 
-                            method: 'POST',
-                            headers: headers,
-                            body: JSON.stringify({ shop: '${shop}' })
-                        });
-                        
-                        const data = await res.json();
-                        
-                        if (data.success) {
-                            status.style.color = '#4caf50';
-                            status.innerHTML = '✅ <strong>Success!</strong> Standard and Express rates created.';
-                            btn.innerHTML = originalText;
-                            btn.disabled = false;
-                        } else {
-                            status.style.color = '#ffeb3b';
-                            status.textContent = 'Error: ' + (data.error || 'Unknown error');
-                            btn.innerHTML = originalText;
-                            btn.disabled = false;
-                        }
-                    } catch(e) {
-                        console.error(e);
-                        status.style.color = '#ffeb3b';
-                        status.textContent = 'Connection Error: ' + e.message;
-                        btn.innerHTML = originalText;
-                        btn.disabled = false;
-                    }
-                }
-                </script>
               </div>
 
               <div class="card">
@@ -2797,7 +2752,8 @@ async function setupFixedRates(shop, accessToken) {
                 method: "POST",
                 headers: {
                     "X-Shopify-Access-Token": accessToken,
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
                 },
                 body: JSON.stringify({
                     shipping_zone: {
