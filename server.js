@@ -2095,6 +2095,49 @@ function getDefaultRates(rate) {
 }
 
 // ======================
+// 5.0) REINSTALACIÓN FORZADA (para tokens inválidos)
+// ======================
+app.get("/reinstall/:shop", async (req, res) => {
+    const shop = req.params.shop;
+
+    if (!shop || !shop.includes('.myshopify.com')) {
+        return res.status(400).send("Invalid shop domain");
+    }
+
+    try {
+        // 1. Eliminar de memoria
+        if (shopsTokens[shop]) {
+            delete shopsTokens[shop];
+            console.log(`🗑️ Deleted token from memory for ${shop}`);
+        }
+
+        // 2. Eliminar de la base de datos
+        await db.execute(`DELETE FROM shopify_shops WHERE shop_domain = ?`, [shop]);
+        console.log(`🗑️ Deleted shop record from DB for ${shop}`);
+
+        // 3. Redirigir a OAuth
+        const scopes = process.env.SCOPES;
+        const redirectUri = `${process.env.APP_URL}/auth/callback`;
+        const clientId = process.env.SHOPIFY_API_KEY;
+
+        const installUrl =
+            `https://${shop}/admin/oauth/authorize?` +
+            querystring.stringify({
+                client_id: clientId,
+                scope: scopes,
+                redirect_uri: redirectUri,
+            });
+
+        console.log(`🔄 Force reinstall: Redirecting ${shop} to OAuth`);
+        res.redirect(installUrl);
+
+    } catch (err) {
+        console.error("Error in force reinstall:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ======================
 // 5) /auth (inicio OAuth)
 // ======================
 app.get("/auth", (req, res) => {
