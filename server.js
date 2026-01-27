@@ -2413,22 +2413,87 @@ async function registerCarrierService(shop, accessToken) {
 }
 
 // ======================
+// 8.2) DIAGNÓSTICO Y REPARACIÓN DE CARRIER SERVICE
+// ======================
+app.get("/debug/carrier/:shop", async (req, res) => {
+    const shop = req.params.shop;
+
+    try {
+        const shopData = await getShopFromDB(shop);
+
+        if (!shopData || !shopData.access_token) {
+            return res.json({
+                error: "Shop not found or no token",
+                shop,
+                found: false
+            });
+        }
+
+        const apiVersion = "2024-07";
+        const response = await fetch(
+            `https://${shop}/admin/api/${apiVersion}/carrier_services.json`,
+            { headers: { "X-Shopify-Access-Token": shopData.access_token } }
+        );
+        const data = await response.json();
+
+        const pathxpressCarrier = (data.carrier_services || []).find(
+            cs => cs.name === "PathXpress Shipping"
+        );
+
+        res.json({
+            shop,
+            found: true,
+            shopConfig: {
+                client_id: shopData.pathxpress_client_id,
+                has_token: !!shopData.access_token,
+                auto_sync: shopData.auto_sync,
+                default_service: shopData.default_service_type
+            },
+            all_carrier_services: data.carrier_services || [],
+            pathxpress_carrier: pathxpressCarrier || null,
+            pathxpress_status: pathxpressCarrier
+                ? (pathxpressCarrier.active ? "✅ ACTIVE" : "❌ INACTIVE")
+                : "❌ NOT REGISTERED"
+        });
+    } catch (err) {
+        res.json({ error: err.message, shop });
+    }
+});
+
+// Endpoint para FORZAR re-registro del Carrier Service
+app.get("/fix/carrier/:shop", async (req, res) => {
+    const shop = req.params.shop;
+
+    try {
+        const shopData = await getShopFromDB(shop);
+
+        if (!shopData || !shopData.access_token) {
+            return res.json({
+                success: false,
+                error: "Shop not found or no token",
+                shop
+            });
+        }
+
+        // Forzar re-registro
+        await registerCarrierService(shop, shopData.access_token);
+
+        res.json({
+            success: true,
+            message: `Carrier Service re-registered for ${shop}`,
+            shop,
+            next_step: "Go to checkout and test rates"
+        });
+    } catch (err) {
+        res.json({ success: false, error: err.message, shop });
+    }
+});
+
+// ======================
 // 9) ARRANCAR SERVIDOR
 // ======================
-app.listen(PORT, () => {
-    console.log(
-        `PATHXPRESS Shopify Server listening on http://localhost:${PORT}`
-    );
-
-    // Iniciar Cron/Intervalo de Sincronización (cada 60 segundos)
-    setInterval(syncShipmentsToShopify, 60 * 1000);
-
-    // Iniciar Cron de Reintentos (cada 5 minutos)
-    setInterval(processRetryQueue, 5 * 60 * 1000);
-
-    console.log("🔄 Automatic synchronization started (every 60s).");
-    console.log("🛡️ Retry system started (every 5m).");
-});
+// NOTA: El servidor se inicia al final del archivo con keepAlive()
+// Los intervalos de sincronización se mueven allí
 
 // ======================
 // 11) SISTEMA DE REINTENTOS (Error Handling)
@@ -2874,6 +2939,15 @@ function keepAlive() {
 app.listen(PORT, () => {
     console.log(`🚀 PATHXPRESS Shopify App running on port ${PORT}`);
     console.log(`📡 App URL: ${process.env.APP_URL || 'Not configured'}`);
+
+    // Iniciar Cron/Intervalo de Sincronización (cada 60 segundos)
+    setInterval(syncShipmentsToShopify, 60 * 1000);
+
+    // Iniciar Cron de Reintentos (cada 5 minutos)
+    setInterval(processRetryQueue, 5 * 60 * 1000);
+
+    console.log("🔄 Automatic synchronization started (every 60s).");
+    console.log("🛡️ Retry system started (every 5m).");
 
     // Start keep-alive after server is running
     keepAlive();
