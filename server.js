@@ -189,6 +189,7 @@ async function saveShipmentToOrdersTable(shipment) {
         height,
         serviceType,
         specialInstructions,
+        itemsDescription,
         codRequired,
         codAmount,
         codCurrency,
@@ -205,7 +206,7 @@ async function saveShipmentToOrdersTable(shipment) {
         routeBatchId,
         createdAt,
         updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 // client / identificación
                 shipment.clientId,
@@ -239,6 +240,7 @@ async function saveShipmentToOrdersTable(shipment) {
                 // servicio
                 shipment.serviceType || "DOM",
                 shipment.specialInstructions || "",
+                shipment.itemsDescription || null, // Product descriptions from Shopify
 
                 // COD
                 shipment.codRequired ? 1 : 0,
