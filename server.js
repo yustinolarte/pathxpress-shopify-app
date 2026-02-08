@@ -1315,7 +1315,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
                     cod: shipment.codRequired ? shipment.codAmount : '0',
                     pcs: shipment.pieces
                 };
-                return btoa(JSON.stringify(data));
+                // Fix for UTF-8 (Arabic) characters in btoa
+                return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
             }
 
             async function generateWaybillPDF(shipment) {
