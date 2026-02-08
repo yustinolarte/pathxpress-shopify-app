@@ -771,6 +771,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
             const [rows] = await db.execute(`
                 SELECT 
                     s.shop_order_name, 
+                    s.items_description,
                     o.*
                 FROM shopify_shipments s
                 JOIN orders o ON (o.orderNumber = s.shop_order_name)
@@ -804,7 +805,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         createdAt: row.createdAt,
                         codRequired: row.codRequired,
                         codAmount: row.codAmount,
-                        codCurrency: row.codCurrency
+                        codCurrency: row.codCurrency,
+                        itemsDescription: row.items_description
                     }).replace(/"/g, '&quot;');
 
                     return `
