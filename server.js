@@ -1617,8 +1617,25 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 pdf.setFont('helvetica', 'normal');
                 pdf.text('pathxpress.net  |  +971 522803433', pageWidth / 2, pageHeight - 4, { align: 'center' });
 
-                // Save
-                pdf.save('waybill-' + shipment.waybillNumber + '.pdf');
+                // Save - use bloburl + window.open for better mobile compatibility
+                const pdfBlob = pdf.output('blob');
+                const blobUrl = URL.createObjectURL(pdfBlob);
+                
+                // Try opening in new window (works better on mobile)
+                const newWindow = window.open(blobUrl, '_blank');
+                
+                if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                    // Popup was blocked, fallback to download link
+                    const link = document.createElement('a');
+                    link.href = blobUrl;
+                    link.download = 'waybill-' + shipment.waybillNumber + '.pdf';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+                
+                // Clean up blob URL after a delay
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
             }
         </script>
       </head>
