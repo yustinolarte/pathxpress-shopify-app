@@ -811,8 +811,12 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         itemsDescription: row.items_description
                     }).replace(/"/g, '&quot;');
 
+                    const deleteBtn = row.status === 'PENDING_PICKUP'
+                        ? `<button class="delete-btn" onclick="deleteOrder(${row.id}, '${row.shop_order_name}')" title="Delete Order"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
+                        : '';
+
                     return `
-                    <tr>
+                    <tr id="order-row-${row.id}">
                         <td><strong style="color: var(--text-primary);">${row.shop_order_name}</strong></td>
                         <td><span style="color: var(--blue-electric); font-weight: 600;">${row.waybillNumber || '---'}</span></td>
                         <td>
@@ -821,11 +825,12 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             </span>
                         </td>
                         <td>${new Date(row.createdAt).toLocaleDateString()}</td>
-                        <td>
+                        <td style="display: flex; gap: 8px; align-items: center;">
                             ${row.waybillNumber
                             ? `<button class="print-btn" onclick='generateWaybillPDF(${shipmentData})'><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>Print Label</button>`
                             : '<span style="color: var(--text-muted);">Pending</span>'
                         }
+                            ${deleteBtn}
                         </td>
                     </tr>
                 `}).join("");
@@ -1145,6 +1150,25 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 color: var(--text-primary);
                 background: rgba(45, 108, 246, 0.1);
                 border-radius: 6px;
+                transform: none;
+                box-shadow: none;
+            }
+            
+            .delete-btn {
+                background: none;
+                border: none;
+                padding: 6px 8px;
+                color: var(--red-neon);
+                cursor: pointer;
+                display: inline-flex;
+                align-items: center;
+                transition: all 0.2s ease;
+                box-shadow: none;
+                border-radius: 6px;
+            }
+            
+            .delete-btn:hover {
+                background: rgba(225, 6, 0, 0.15);
                 transform: none;
                 box-shadow: none;
             }
@@ -1906,6 +1930,90 @@ app.get("/app", requireSessionToken, async (req, res) => {
         lucide.createIcons();
                 }
             });
+            
+            // Delete Order Function (Only for PENDING_PICKUP orders)
+            async function deleteOrder(orderId, orderName) {
+                if (!confirm(\`Are you sure you want to delete order \${orderName}?\\n\\nThis action cannot be undone and will remove the order from PathXpress.\`)) {
+                    return;
+                }
+                
+                const row = document.getElementById('order-row-' + orderId);
+                const deleteBtn = row?.querySelector('.delete-btn');
+                
+                if (deleteBtn) {
+                    deleteBtn.disabled = true;
+                    deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner"><circle cx="12" cy="12" r="10"></circle></svg>';
+                }
+                
+                try {
+                    let token = null;
+                    if (window.shopify && window.shopify.idToken) {
+                        token = await window.shopify.idToken();
+                    }
+                    
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (token) headers['Authorization'] = 'Bearer ' + token;
+                    
+                    const res = await fetch('/api/orders/' + orderId + '?shop=${shop}', {
+                        method: 'DELETE',
+                        headers: headers
+                    });
+                    
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        // Animate row removal
+                        if (row) {
+                            row.style.transition = 'all 0.3s ease';
+                            row.style.opacity = '0';
+                            row.style.transform = 'translateX(-20px)';
+                            setTimeout(() => row.remove(), 300);
+                        }
+                        
+                        // Show success toast
+                        showToast('Order ' + orderName + ' deleted successfully', 'success');
+                    } else {
+                        showToast(data.error || 'Failed to delete order', 'error');
+                        if (deleteBtn) {
+                            deleteBtn.disabled = false;
+                            deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
+                        }
+                    }
+                } catch (err) {
+                    console.error('Delete error:', err);
+                    showToast('Connection error', 'error');
+                    if (deleteBtn) {
+                        deleteBtn.disabled = false;
+                        deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
+                    }
+                }
+            }
+            
+            // Simple toast notification
+            function showToast(message, type) {
+                const toast = document.createElement('div');
+                toast.style.cssText = \`
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    padding: 12px 20px;
+                    border-radius: 8px;
+                    color: white;
+                    font-weight: 500;
+                    z-index: 9999;
+                    animation: slideIn 0.3s ease;
+                    background: \${type === 'success' ? 'linear-gradient(135deg, #22c55e, #16a34a)' : 'linear-gradient(135deg, #ef4444, #dc2626)'};
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+                \`;
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateY(10px)';
+                    toast.style.transition = 'all 0.3s ease';
+                    setTimeout(() => toast.remove(), 300);
+                }, 3000);
+            }
 </script>
       </body >
     </html >
@@ -1996,6 +2104,68 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     } catch (err) {
         console.error("Error saving settings:", err);
         res.status(500).json({ success: false, message: "Internal server error saving settings." });
+    }
+});
+
+// ======================
+// 4.1.3) DELETE ORDER (Only PENDING_PICKUP)
+// ======================
+app.delete("/api/orders/:orderId", requireSessionToken, async (req, res) => {
+    const { orderId } = req.params;
+    const session = req.shopifySession;
+    let shop = session ? session.shop : null;
+
+    // Fallback for query param
+    if (!shop && req.query.shop) {
+        shop = req.query.shop;
+    }
+
+    if (!shop) {
+        return res.status(401).json({ success: false, error: "Unauthorized: Missing shop" });
+    }
+
+    try {
+        // 1. Verify the order exists and belongs to this shop
+        const [orderRows] = await db.execute(
+            `SELECT o.id, o.orderNumber, o.status, s.shop_domain 
+             FROM orders o 
+             JOIN shopify_shipments s ON s.shop_order_name = o.orderNumber
+             WHERE o.id = ? AND s.shop_domain = ?`,
+            [orderId, shop]
+        );
+
+        if (orderRows.length === 0) {
+            return res.status(404).json({ success: false, error: "Order not found" });
+        }
+
+        const order = orderRows[0];
+
+        // 2. Only allow deletion of PENDING_PICKUP orders
+        if (order.status !== 'PENDING_PICKUP') {
+            return res.status(400).json({
+                success: false,
+                error: `Cannot delete order with status '${order.status}'. Only orders with status 'PENDING_PICKUP' can be deleted.`
+            });
+        }
+
+        // 3. Delete from codRecords first (if exists)
+        await db.execute('DELETE FROM codRecords WHERE shipmentId = ?', [orderId]);
+
+        // 4. Delete from orders table
+        await db.execute('DELETE FROM orders WHERE id = ?', [orderId]);
+
+        // 5. Delete from shopify_shipments
+        await db.execute(
+            'DELETE FROM shopify_shipments WHERE shop_domain = ? AND shop_order_name = ?',
+            [shop, order.orderNumber]
+        );
+
+        console.log(`🗑️ Order ${order.orderNumber} (ID: ${orderId}) deleted by shop ${shop}`);
+
+        res.json({ success: true, message: `Order ${order.orderNumber} deleted successfully` });
+    } catch (err) {
+        console.error("⛔ Error deleting order:", err);
+        res.status(500).json({ success: false, error: "Internal server error" });
     }
 });
 
