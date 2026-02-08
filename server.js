@@ -3208,6 +3208,8 @@ function orderToShipment(order, shop, shopData) {
     const height = Number(process.env.DEFAULT_HEIGHT) || 15;
 
     // Detección de COD mejorada
+    const paymentGateways = order.payment_gateway_names || [];
+
     // 1. Verificar si el método de pago incluye "Cash on Delivery" (o similar)
     const isCodGateway = paymentGateways.some(pg =>
         /cash|cod|contrareembolso|contra entrega|دفع|istlam/i.test(pg)
