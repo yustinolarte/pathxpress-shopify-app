@@ -110,8 +110,9 @@ async function saveShipmentToMySQL(shipment) {
         total_weight_kg,
         cod_amount,
         currency,
-        status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        status,
+        items_description
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 shipment.shopDomain,
                 shipment.shopOrderId,
@@ -125,6 +126,7 @@ async function saveShipmentToMySQL(shipment) {
                 shipment.codAmount ?? null,
                 shipment.currency || null,
                 shipment.status || "PENDING_PICKUP",
+                shipment.itemsDescription || null,
             ]
         );
 
@@ -1507,13 +1509,19 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 y += 16;
 
                 // ===== SPECIAL INSTRUCTIONS & CONTENTS =====
-                // Muestra Notas y Contenido del Paquete si existen
                 const hasNotes = shipment.specialInstructions && shipment.specialInstructions.trim();
+                // Ahora leemos itemsDescription de la DB
                 const hasItems = shipment.itemsDescription && shipment.itemsDescription.trim();
 
                 if (hasNotes || hasItems) {
-                    const boxHeight = (hasNotes && hasItems) ? 14 : 10; // Mas alto si hay ambos
+                    // Calculamos altura dinamica
+                    let boxHeight = 10;
+                    const notesLines = hasNotes ? pdf.splitTextToSize(shipment.specialInstructions, contentWidth - 15) : [];
+                    const itemsLines = hasItems ? pdf.splitTextToSize(shipment.itemsDescription, contentWidth - 15) : [];
                     
+                    const totalLines = notesLines.length + itemsLines.length;
+                    boxHeight = Math.max(10, totalLines * 3 + 6); // Altura flexible
+
                     pdf.setDrawColor(black);
                     pdf.setLineWidth(0.5);
                     pdf.rect(margin, y, contentWidth, boxHeight);
@@ -1527,10 +1535,9 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
                         pdf.setFontSize(7);
                         pdf.setFont('helvetica', 'normal');
-                        const instrLines = pdf.splitTextToSize(shipment.specialInstructions, contentWidth - 15);
-                        pdf.text(instrLines.slice(0, 1).join(' '), margin + 12, currentY);
+                        pdf.text(notesLines, margin + 12, currentY);
                         
-                        if (hasItems) currentY += 5; // Salto si hay items tambien
+                        currentY += (notesLines.length * 3) + 2; 
                     }
 
                     if (hasItems) {
@@ -1540,9 +1547,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
                         pdf.setFontSize(7);
                         pdf.setFont('helvetica', 'normal');
-                        // Cortar si es muy largo
-                        const itemLines = pdf.splitTextToSize(shipment.itemsDescription, contentWidth - 15);
-                        pdf.text(itemLines.slice(0, 1).join(' '), margin + 12, currentY);
+                        pdf.text(itemsLines, margin + 12, currentY);
                     }
 
                     y += boxHeight + 2;
@@ -3281,11 +3286,13 @@ function orderToShipment(order, shop, shopData) {
             0
         ) || 1,
 
-        // ITEM DESCRIPTION
-        // Generamos una cadena con los items: "2x Camiseta, 1x Pantalon"
+        // ITEM DESCRIPTION (Campo nuevo para columna items_description)
         itemsDescription: (order.line_items || []).map(item =>
             `${item.quantity}x ${item.name}`
         ).join(", "),
+
+        // Notas normales
+        specialInstructions: order.note || "",
 
         totalWeightKg,
         length,
