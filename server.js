@@ -1506,22 +1506,46 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
                 y += 16;
 
-                // ===== SPECIAL INSTRUCTIONS =====
-                if (shipment.specialInstructions && shipment.specialInstructions.trim()) {
+                // ===== SPECIAL INSTRUCTIONS & CONTENTS =====
+                // Muestra Notas y Contenido del Paquete si existen
+                const hasNotes = shipment.specialInstructions && shipment.specialInstructions.trim();
+                const hasItems = shipment.itemsDescription && shipment.itemsDescription.trim();
+
+                if (hasNotes || hasItems) {
+                    const boxHeight = (hasNotes && hasItems) ? 14 : 10; // Mas alto si hay ambos
+                    
                     pdf.setDrawColor(black);
                     pdf.setLineWidth(0.5);
-                    pdf.rect(margin, y, contentWidth, 10);
+                    pdf.rect(margin, y, contentWidth, boxHeight);
 
-                    pdf.setFontSize(6);
-                    pdf.setFont('helvetica', 'bold');
-                    pdf.text('NOTE:', margin + 2, y + 4);
+                    let currentY = y + 4;
 
-                    pdf.setFontSize(7);
-                    pdf.setFont('helvetica', 'normal');
-                    const instrLines = pdf.splitTextToSize(shipment.specialInstructions, contentWidth - 15);
-                    pdf.text(instrLines.slice(0, 1).join(' '), margin + 12, y + 4);
+                    if (hasNotes) {
+                        pdf.setFontSize(6);
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.text('NOTE:', margin + 2, currentY);
 
-                    y += 12;
+                        pdf.setFontSize(7);
+                        pdf.setFont('helvetica', 'normal');
+                        const instrLines = pdf.splitTextToSize(shipment.specialInstructions, contentWidth - 15);
+                        pdf.text(instrLines.slice(0, 1).join(' '), margin + 12, currentY);
+                        
+                        if (hasItems) currentY += 5; // Salto si hay items tambien
+                    }
+
+                    if (hasItems) {
+                        pdf.setFontSize(6);
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.text('ITEMS:', margin + 2, currentY);
+
+                        pdf.setFontSize(7);
+                        pdf.setFont('helvetica', 'normal');
+                        // Cortar si es muy largo
+                        const itemLines = pdf.splitTextToSize(shipment.itemsDescription, contentWidth - 15);
+                        pdf.text(itemLines.slice(0, 1).join(' '), margin + 12, currentY);
+                    }
+
+                    y += boxHeight + 2;
                 }
 
                 // ===== MAIN BARCODE (Large, High Quality) =====
@@ -3185,9 +3209,8 @@ function orderToShipment(order, shop, shopData) {
 
     // Detección de COD mejorada
     // 1. Verificar si el método de pago incluye "Cash on Delivery" (o similar)
-    const paymentGateways = order.payment_gateway_names || [];
     const isCodGateway = paymentGateways.some(pg =>
-        /cash|cod|contrareembolso|contra entrega/i.test(pg)
+        /cash|cod|contrareembolso|contra entrega|دفع|istlam/i.test(pg)
     );
 
     // 2. Verificar estado financiero (pending/authorized suele ser COD, paid es tarjeta)
@@ -3196,9 +3219,10 @@ function orderToShipment(order, shop, shopData) {
         order.financial_status === "authorized" ||
         order.financial_status === "partially_paid";
 
-    // Regla final: Es COD si el gateway lo dice O si está pendiente de pago
-    // (A veces 'manual' también es COD)
-    const isCOD = isCodGateway || (isFinancialPending && paymentGateways.includes("manual"));
+    // Regla final: Es COD si:
+    // a) El gateway lo dice explícitamente (palabras clave)
+    // b) Está pendiente de pago Y (no hay gateway definido O es manual) -> Típico de Draft Orders o pedidos manuales
+    const isCOD = isCodGateway || (isFinancialPending && (paymentGateways.length === 0 || paymentGateways.includes("manual")));
 
     const codAmount = isCOD ? Number(order.total_price) || 0 : 0;
 
@@ -3234,7 +3258,16 @@ function orderToShipment(order, shop, shopData) {
         consigneeName: `${shipping.first_name || ""} ${shipping.last_name || ""}`.trim(),
         consigneePhone: shipping.phone || customer.phone || "", // Evitar NULL
         consigneeEmail: customer.email || null,
-        addressLine1: shipping.address1 || "",
+
+        // COMBINED & CLEANED ADDRESS
+        // Unimos empresa, linea 1 y linea 2 para asegurar que no falte info.
+        // Tambien filtramos caracteres invisibles (Zero-width spaces) que rompen PDFs.
+        addressLine1: [shipping.company, shipping.address1, shipping.address2]
+            .filter(Boolean) // Elimina nulos/vacios
+            .join(", ")      // Une con comas
+            .replace(/[\u200B-\u200D\uFEFF]/g, "") // Quita caracteres invisibles
+            .trim(),
+
         city: shipping.city || "",
         emirate: shipping.province || "",
         postalCode: shipping.zip || "",
@@ -3245,6 +3278,13 @@ function orderToShipment(order, shop, shopData) {
             (sum, item) => sum + (item.quantity || 0),
             0
         ) || 1,
+
+        // ITEM DESCRIPTION
+        // Generamos una cadena con los items: "2x Camiseta, 1x Pantalon"
+        itemsDescription: (order.line_items || []).map(item =>
+            `${item.quantity}x ${item.name}`
+        ).join(", "),
+
         totalWeightKg,
         length,
         width,
