@@ -3287,7 +3287,10 @@ async function syncShipmentsToShopify() {
 
         if (rows.length === 0) return;
 
-        console.log(`🔄 Found ${rows.length} shipments to sync with Shopify.`);
+        console.log(`🔄 Found ${rows.length} shipments to sync with Shopify:`);
+        for (const r of rows) {
+            console.log(`   📋 Order: ${r.shop_order_name} | Shopify ID: ${r.shop_order_id} | Status: ${r.current_status} | Waybill: ${r.waybillNumber} | Shipment DB ID: ${r.shipment_id}`);
+        }
 
         for (const row of rows) {
             await fulfillShopifyOrder(row);
@@ -3299,7 +3302,9 @@ async function syncShipmentsToShopify() {
 }
 
 async function fulfillShopifyOrder(row) {
-    const { shipment_id, shop_domain, shop_order_id, waybillNumber } = row;
+    const { shipment_id, shop_domain, shop_order_id, shop_order_name, waybillNumber, current_status } = row;
+
+    console.log(`\n🔄 Processing fulfillment for: ${shop_order_name} (Shopify Order ID: ${shop_order_id})`);
 
     try {
         // 1. Obtener Token de la tienda
@@ -3316,17 +3321,34 @@ async function fulfillShopifyOrder(row) {
         // NOTA: Desde 2023, Shopify deprecó POST /orders/{id}/fulfillments.
         // Hay que usar POST /fulfillments.json con `line_items_by_fulfillment_order`.
         // Paso A: Obtener fulfillment_orders para esta orden
-        const foRes = await fetch(`https://${shop_domain}/admin/api/2024-07/orders/${shop_order_id}/fulfillment_orders.json`, {
+        const apiUrl = `https://${shop_domain}/admin/api/2024-07/orders/${shop_order_id}/fulfillment_orders.json`;
+        console.log(`   🌐 Calling Shopify API: ${apiUrl}`);
+
+        const foRes = await fetch(apiUrl, {
             headers: { "X-Shopify-Access-Token": accessToken }
         });
+
+        console.log(`   📡 Shopify API Response Status: ${foRes.status}`);
+
         const foJson = await foRes.json();
         const fulfillmentOrders = foJson.fulfillment_orders || [];
+
+        console.log(`   📦 Fulfillment Orders returned: ${fulfillmentOrders.length}`);
+        for (const fo of fulfillmentOrders) {
+            console.log(`      - FO ID: ${fo.id} | Status: ${fo.status} | Request Status: ${fo.request_status}`);
+        }
+
+        // If Shopify returned errors, log them
+        if (foJson.errors) {
+            console.error(`   ⛔ Shopify API Error:`, JSON.stringify(foJson.errors));
+            return;
+        }
 
         // Filtramos las que estén 'open'
         const openFO = fulfillmentOrders.find(fo => fo.status === 'open' || fo.status === 'in_progress');
 
         if (!openFO) {
-            console.log(`ℹ️ Order ${shop_order_id} has no open fulfillment_orders. Marking as locally synced.`);
+            console.log(`   ℹ️ Order ${shop_order_name} (ID: ${shop_order_id}) has no open fulfillment_orders. Marking as locally synced.`);
             // Actualizamos localmente para no reintentar infinito
             await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = 'ALREADY_FULFILLED' WHERE id = ?", [shipment_id]);
             return;
