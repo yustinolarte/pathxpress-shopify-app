@@ -2526,6 +2526,7 @@ app.get("/auth", (req, res) => {
 
     console.log("🔐 Starting OAuth...");
     console.log("👉 Generated Redirect URI:", redirectUri);
+    console.log("🔑 Requesting Scopes:", scopes);
 
     const installUrl =
         `https://${shop}/admin/oauth/authorize?` +
@@ -2580,6 +2581,8 @@ app.get("/auth/callback", async (req, res) => {
     console.log("🔥 SHOP INSTALLED:");
     console.log("Shop:", shop);
     console.log("Access Token:", accessToken);
+    console.log("🔑 Scopes Granted:", tokenData.scope);
+    console.log("🔑 ENV SCOPES:", process.env.SCOPES);
 
     shopsTokens[shop] = accessToken;
     console.log("Tokens saved in memory:", shopsTokens);
