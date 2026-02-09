@@ -125,7 +125,7 @@ async function saveShipmentToMySQL(shipment) {
                 shipment.totalWeightKg ?? null,
                 shipment.codAmount ?? null,
                 shipment.currency || null,
-                shipment.status || "PENDING_PICKUP",
+                shipment.status || "pending_pickup",
                 shipment.itemsDescription || null,
             ]
         );
@@ -253,7 +253,7 @@ async function saveShipmentToOrdersTable(shipment) {
                     : new Date(),
                 null, // deliveryDateEstimated
                 null, // deliveryDateReal
-                shipment.status || "PENDING_PICKUP",
+                shipment.status || "pending_pickup",
                 new Date(), // lastStatusUpdate
 
                 // geolocalización / ventana horaria / prioridad / rutas
@@ -3281,7 +3281,7 @@ async function syncShipmentsToShopify() {
             JOIN shopify_shops ss ON ss.shop_domain = s.shop_domain
             JOIN orders o ON (o.orderNumber = s.shop_order_name AND o.clientId = ss.pathxpress_client_id)
             WHERE s.shopify_fulfillment_id IS NULL
-              AND o.status IN ('PICKED_UP', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED')
+              AND LOWER(o.status) IN ('picked_up', 'in_transit', 'out_for_delivery', 'delivered')
             LIMIT 10
         `);
 
@@ -3505,7 +3505,7 @@ function orderToShipment(order, shop, shopData) {
 
         // Fechas / estado
         pickupDate: order.created_at || new Date().toISOString(),
-        status: "PENDING_PICKUP",
+        status: "pending_pickup",
         createdAt: order.created_at || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
     };
