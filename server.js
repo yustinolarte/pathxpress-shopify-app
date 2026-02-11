@@ -3302,6 +3302,9 @@ async function syncShipmentsToShopify() {
     } catch (err) {
         console.error("⛔ Error in synchronization cycle:", err);
     }
+
+    // Also sync fulfillment events (status updates) for already-fulfilled orders
+    await syncFulfillmentEvents();
 }
 
 async function fulfillShopifyOrder(row) {
@@ -3389,7 +3392,7 @@ async function fulfillShopifyOrder(row) {
             console.log(`✅ Fulfillment created in Shopify: ${newFulfillmentId} for order ${shop_order_id}`);
 
             // 4. Actualizar DB local
-            await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = ? WHERE id = ?", [newFulfillmentId, shipment_id]);
+            await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = ?, last_synced_status = ? WHERE id = ?", [newFulfillmentId, current_status || 'picked_up', shipment_id]);
         } else {
             console.error(`⛔ Error creating fulfillment in Shopify:`, JSON.stringify(createJson));
         }
@@ -3398,6 +3401,126 @@ async function fulfillShopifyOrder(row) {
         console.error(`⛔ Exception syncing order ${shop_order_id}:`, err);
     }
 }
+
+// ======================
+// 10.1) FULFILLMENT EVENTS — Status Updates (in_transit, out_for_delivery, delivered, etc.)
+// ======================
+
+// Map portal statuses to Shopify fulfillment event statuses
+const STATUS_TO_SHOPIFY_EVENT = {
+    'picked_up': 'confirmed',
+    'in_transit': 'in_transit',
+    'out_for_delivery': 'out_for_delivery',
+    'delivered': 'delivered',
+    'failed_delivery': 'failure',
+    'returned': 'failure'
+};
+
+// Status priority for determining if an update is needed
+const STATUS_PRIORITY = ['pending_pickup', 'picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'failed_delivery', 'returned'];
+
+async function syncFulfillmentEvents() {
+    try {
+        // Find shipments that:
+        // - Already have a real shopify_fulfillment_id (fulfilled in Shopify)
+        // - Portal status has changed since last sync (last_synced_status != current status)
+        // - Current status maps to a Shopify event
+        const [rows] = await db.execute(`
+            SELECT 
+                s.id AS shipment_id,
+                s.shop_domain,
+                s.shop_order_id,
+                s.shop_order_name,
+                s.shopify_fulfillment_id,
+                s.last_synced_status,
+                o.waybillNumber,
+                o.status AS current_status
+            FROM shopify_shipments s
+            JOIN shopify_shops ss ON ss.shop_domain = s.shop_domain
+            JOIN orders o ON (o.orderNumber = s.shop_order_name AND o.clientId = ss.pathxpress_client_id)
+            WHERE s.shopify_fulfillment_id IS NOT NULL
+              AND s.shopify_fulfillment_id != 'ALREADY_FULFILLED'
+              AND LOWER(o.status) IN ('in_transit', 'out_for_delivery', 'delivered', 'failed_delivery', 'returned')
+              AND (s.last_synced_status IS NULL OR LOWER(s.last_synced_status) != LOWER(o.status))
+            LIMIT 10
+        `);
+
+        if (rows.length === 0) return;
+
+        console.log(`📡 Found ${rows.length} fulfillment events to sync:`);
+        for (const r of rows) {
+            console.log(`   📋 Order: ${r.shop_order_name} | ${r.last_synced_status} → ${r.current_status}`);
+        }
+
+        for (const row of rows) {
+            await updateFulfillmentEvent(row);
+        }
+
+    } catch (err) {
+        console.error("⛔ Error in fulfillment events sync:", err);
+    }
+}
+
+async function updateFulfillmentEvent(row) {
+    const { shipment_id, shop_domain, shop_order_id, shopify_fulfillment_id, shop_order_name, current_status } = row;
+
+    const shopifyEventStatus = STATUS_TO_SHOPIFY_EVENT[current_status.toLowerCase()];
+    if (!shopifyEventStatus) {
+        console.log(`   ⚠️ No Shopify event mapping for status: ${current_status}`);
+        return;
+    }
+
+    try {
+        const shopData = await getShopFromDB(shop_domain);
+        if (!shopData || !shopData.access_token) {
+            console.error(`   ⚠️ No token for ${shop_domain}, skipping event.`);
+            return;
+        }
+
+        const eventPayload = {
+            event: {
+                status: shopifyEventStatus
+            }
+        };
+
+        // Add message for failure statuses
+        if (shopifyEventStatus === 'failure') {
+            eventPayload.event.message = current_status === 'returned'
+                ? 'Package returned to sender'
+                : 'Delivery attempt failed';
+        }
+
+        const apiUrl = `https://${shop_domain}/admin/api/2024-07/orders/${shop_order_id}/fulfillments/${shopify_fulfillment_id}/events.json`;
+
+        const res = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "X-Shopify-Access-Token": shopData.access_token,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify(eventPayload)
+        });
+
+        const resJson = await res.json();
+
+        if (res.ok) {
+            console.log(`   ✅ Event '${shopifyEventStatus}' sent for order ${shop_order_name}`);
+            // Update last_synced_status
+            await db.execute("UPDATE shopify_shipments SET last_synced_status = ? WHERE id = ?", [current_status, shipment_id]);
+        } else {
+            console.error(`   ⛔ Error sending event for ${shop_order_name}:`, JSON.stringify(resJson));
+            // If Shopify says the fulfillment doesn't exist, mark it to avoid retrying
+            if (res.status === 404) {
+                console.log(`   ℹ️ Fulfillment ${shopify_fulfillment_id} not found. Updating last_synced_status to skip.`);
+                await db.execute("UPDATE shopify_shipments SET last_synced_status = ? WHERE id = ?", [current_status, shipment_id]);
+            }
+        }
+
+    } catch (err) {
+        console.error(`   ⛔ Exception sending event for ${shop_order_name}:`, err);
+    }
+}
+
 
 
 function orderToShipment(order, shop, shopData) {
