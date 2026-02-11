@@ -12,17 +12,31 @@ const db = mysql.createPool({
 
 async function updateFreeShippingColumns() {
     try {
-        // Rename existing column to DOM
+        // Try to add _dom column directly first (if it doesn't exist)
         await db.execute(`
             ALTER TABLE shopify_shops 
-            CHANGE COLUMN free_shipping_threshold free_shipping_threshold_dom DECIMAL(10,2) DEFAULT NULL
+            ADD COLUMN free_shipping_threshold_dom DECIMAL(10,2) DEFAULT NULL
         `);
-        console.log("✅ Renamed free_shipping_threshold to free_shipping_threshold_dom");
+        console.log("✅ Added free_shipping_threshold_dom column directly");
     } catch (err) {
-        if (err.code === 'ER_BAD_FIELD_ERROR') {
-            console.log("ℹ️ Column free_shipping_threshold doesn't exist or already renamed");
+        if (err.code === 'ER_DUP_FIELDNAME') {
+            console.log("ℹ️ Column free_shipping_threshold_dom already exists");
         } else {
-            console.log("Note:", err.message);
+            // If direct add failed, maybe we need to rename the old column?
+            try {
+                // Rename existing column to DOM
+                await db.execute(`
+                    ALTER TABLE shopify_shops 
+                    CHANGE COLUMN free_shipping_threshold free_shipping_threshold_dom DECIMAL(10,2) DEFAULT NULL
+                `);
+                console.log("✅ Renamed free_shipping_threshold to free_shipping_threshold_dom");
+            } catch (renameErr) {
+                if (renameErr.code === 'ER_BAD_FIELD_ERROR') {
+                    console.log("ℹ️ original column free_shipping_threshold doesn't exist either");
+                } else {
+                    console.log("Note on rename:", renameErr.message);
+                }
+            }
         }
     }
 
