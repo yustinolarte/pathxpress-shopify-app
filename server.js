@@ -3288,7 +3288,11 @@ async function syncShipmentsToShopify() {
             LIMIT 10
         `);
 
-        if (rows.length === 0) return;
+        if (rows.length === 0) {
+            // Even if no new shipments to fulfill, we must check for status updates on existing ones
+            await syncFulfillmentEvents();
+            return;
+        }
 
         console.log(`🔄 Found ${rows.length} shipments to sync with Shopify:`);
         for (const r of rows) {
