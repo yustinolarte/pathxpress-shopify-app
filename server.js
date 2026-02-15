@@ -3425,6 +3425,7 @@ async function syncFulfillmentEvents() {
         // - Already have a real shopify_fulfillment_id (fulfilled in Shopify)
         // - Portal status has changed since last sync (last_synced_status != current status)
         // - Current status maps to a Shopify event
+        console.log("🔍 Checking for fulfillment events updates...");
         const [rows] = await db.execute(`
             SELECT 
                 s.id AS shipment_id,
@@ -3445,7 +3446,21 @@ async function syncFulfillmentEvents() {
             LIMIT 10
         `);
 
-        if (rows.length === 0) return;
+        if (rows.length === 0) {
+            // Debug: check if any shipments exist for this order but are being filtered
+            // This is temporary debug to see what's in the DB
+            const [debugRows] = await db.execute(`
+                SELECT s.shop_order_name, s.shopify_fulfillment_id, s.last_synced_status, o.status 
+                FROM shopify_shipments s 
+                JOIN orders o ON o.orderNumber = s.shop_order_name 
+                WHERE o.status IN ('in_transit', 'out_for_delivery') 
+                LIMIT 1
+             `);
+            if (debugRows.length > 0) {
+                console.log("⚠️ Debug: Found potential candidates but query filtered them:", debugRows[0]);
+            }
+            return;
+        }
 
         console.log(`📡 Found ${rows.length} fulfillment events to sync:`);
         for (const r of rows) {
