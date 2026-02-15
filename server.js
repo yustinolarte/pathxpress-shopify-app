@@ -3363,6 +3363,8 @@ async function fulfillShopifyOrder(row) {
         // Paso B: Crear fulfillment sobre esa fulfillment_order
         const fulfillmentPayload = {
             fulfillment: {
+                message: "Shipment created via PathXpress",
+                notify_customer: true, // Ensure customer gets notified
                 line_items_by_fulfillment_order: [
                     {
                         fulfillment_order_id: openFO.id
@@ -3371,7 +3373,7 @@ async function fulfillShopifyOrder(row) {
                 tracking_info: {
                     number: waybillNumber,
                     url: `https://pathxpress.net/tracking?id=${waybillNumber}`,
-                    company: "PathXpress"
+                    company: "PathXpress" // Custom company name
                 }
             }
         };
@@ -3390,6 +3392,7 @@ async function fulfillShopifyOrder(row) {
         if (createRes.ok && createJson.fulfillment) {
             const newFulfillmentId = createJson.fulfillment.id;
             console.log(`✅ Fulfillment created in Shopify: ${newFulfillmentId} for order ${shop_order_id}`);
+            console.log(`   📝 Shopify Response Tracking:`, JSON.stringify(createJson.fulfillment.tracking_info || "No tracking info returned"));
 
             // 4. Actualizar DB local
             await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = ?, last_synced_status = ? WHERE id = ?", [newFulfillmentId, current_status || 'picked_up', shipment_id]);
