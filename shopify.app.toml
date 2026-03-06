@@ -12,9 +12,13 @@ api_version = "2025-10"
   uri = "https://terrible-gerta-pathxpress-ece73c11.koyeb.app/webhooks/shopify"
   compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
 
+  [[webhooks.subscriptions]]
+  topics = [ "returns/request", "returns/approve", "returns/close", "returns/update" ]
+  uri = "https://terrible-gerta-pathxpress-ece73c11.koyeb.app/webhooks/shopify/returns"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_fulfillments,read_orders,read_shipping,write_fulfillments,write_orders,write_shipping,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
+scopes = "read_fulfillments,read_orders,read_shipping,write_fulfillments,write_orders,write_shipping,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_returns,write_returns"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

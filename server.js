@@ -394,6 +394,53 @@ async function getShopFromDB(shopDomain) {
     }
 }
 
+// ======================
+// HELPER: GraphQL Admin API para Shopify
+// ======================
+async function shopifyGraphQL(shop, accessToken, query, variables = {}) {
+    const apiVersion = "2025-10";
+    const url = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
+
+    const response = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
+        },
+        body: JSON.stringify({ query, variables }),
+    });
+
+    const json = await response.json();
+
+    if (json.errors) {
+        console.error("⛔ GraphQL errors:", json.errors);
+        throw new Error(json.errors.map(e => e.message).join(", "));
+    }
+
+    return json.data;
+}
+
+// ======================
+// HELPER: Generar Waybill Number para returns/exchanges desde Shopify
+// ======================
+async function generateNextWaybillNumber() {
+    const [rows] = await db.execute(
+        "SELECT waybillNumber FROM orders WHERE waybillNumber LIKE 'PX2025%' ORDER BY id DESC LIMIT 1"
+    );
+
+    let nextSequence = 1;
+    if (rows.length > 0 && rows[0].waybillNumber) {
+        const suffix = rows[0].waybillNumber.replace("PX2025", "");
+        const seq = parseInt(suffix, 10);
+        if (!isNaN(seq)) {
+            nextSequence = seq + 1;
+        }
+    }
+
+    const sequenceStr = nextSequence.toString().padStart(5, '0');
+    return `PX2025${sequenceStr}`;
+}
+
 // Tokens en memoria por tienda
 const shopsTokens = {}; // { "tienda.myshopify.com": "ACCESS_TOKEN" }
 
@@ -591,6 +638,410 @@ app.post(
 );
 
 
+// --- Returns/Exchanges Webhook ---
+app.post(
+    "/webhooks/shopify/returns",
+    webhookMiddleware,
+    async (req, res) => {
+        const shop = req.headers["x-shopify-shop-domain"];
+        const topic = req.headers["x-shopify-topic"];
+
+        console.log(`🔄 RETURN Webhook received - Topic: ${topic}, Shop: ${shop}`);
+
+        try {
+            const bodyString = req.body.toString("utf8");
+            const payload = JSON.parse(bodyString);
+
+            // Get the return admin_graphql_api_id from webhook payload
+            const returnGid = payload.admin_graphql_api_id;
+            if (!returnGid) {
+                console.log("⚠️ Return webhook missing admin_graphql_api_id, skipping");
+                return res.sendStatus(200);
+            }
+
+            // Only process approved returns (or requests if auto-creating)
+            if (topic !== "returns/approve" && topic !== "returns/request") {
+                console.log(`ℹ️ Return webhook topic ${topic} - no action needed, just logging.`);
+                return res.sendStatus(200);
+            }
+
+            // 1. Get shop data from DB
+            const shopData = await getShopFromDB(shop);
+            if (!shopData || !shopData.access_token) {
+                console.log(`⚠️ Shop ${shop} not found in DB or no access token. Skipping return.`);
+                return res.sendStatus(200);
+            }
+
+            const clientId = shopData.pathxpress_client_id || 1;
+            if (!shopData.pathxpress_client_id) {
+                console.warn(`⚠️ Shop ${shop} has no pathxpress_client_id. Using default: 1`);
+            }
+
+            // 2. Check idempotency — don't create duplicate returns
+            const [existingReturn] = await db.execute(
+                "SELECT id FROM orders WHERE shopifyReturnId = ? AND clientId = ?",
+                [returnGid, clientId]
+            );
+            if (existingReturn.length > 0) {
+                console.log(`⚠️ Return ${returnGid} already processed. Skipping duplicate.`);
+                return res.sendStatus(200);
+            }
+
+            // 3. Query Shopify GraphQL for full return details
+            const returnDetails = await shopifyGraphQL(shop, shopData.access_token, `
+                query getReturn($id: ID!) {
+                    return(id: $id) {
+                        id
+                        status
+                        name
+                        order {
+                            id
+                            name
+                            customer {
+                                firstName
+                                lastName
+                                phone
+                                email
+                            }
+                            shippingAddress {
+                                firstName
+                                lastName
+                                phone
+                                address1
+                                address2
+                                city
+                                province
+                                country
+                                zip
+                            }
+                        }
+                        returnLineItems(first: 50) {
+                            edges {
+                                node {
+                                    id
+                                    quantity
+                                    returnReason
+                                    returnReasonNote
+                                    fulfillmentLineItem {
+                                        lineItem {
+                                            title
+                                            variant {
+                                                title
+                                                weight
+                                                weightUnit
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        exchangeLineItems(first: 50) {
+                            edges {
+                                node {
+                                    id
+                                    lineItem {
+                                        title
+                                        quantity
+                                        variant {
+                                            title
+                                            weight
+                                            weightUnit
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            `, { id: returnGid });
+
+            if (!returnDetails || !returnDetails.return) {
+                console.error("⛔ Could not fetch return details from Shopify GraphQL");
+                return res.sendStatus(200);
+            }
+
+            const returnObj = returnDetails.return;
+            const shopifyOrder = returnObj.order;
+            const shippingAddr = shopifyOrder.shippingAddress || {};
+            const customer = shopifyOrder.customer || {};
+
+            // Collect returned item descriptions
+            const returnedItems = returnObj.returnLineItems.edges.map(e => {
+                const item = e.node;
+                const lineItem = item.fulfillmentLineItem?.lineItem;
+                return `${lineItem?.title || 'Unknown'} (x${item.quantity})`;
+            });
+
+            // Calculate total weight from returned items
+            let totalWeightKg = 0;
+            returnObj.returnLineItems.edges.forEach(e => {
+                const variant = e.node.fulfillmentLineItem?.lineItem?.variant;
+                if (variant && variant.weight) {
+                    const weight = variant.weight;
+                    const unit = (variant.weightUnit || "GRAMS").toUpperCase();
+                    if (unit === "GRAMS") totalWeightKg += (weight / 1000) * e.node.quantity;
+                    else if (unit === "KILOGRAMS") totalWeightKg += weight * e.node.quantity;
+                    else if (unit === "POUNDS") totalWeightKg += (weight * 0.453592) * e.node.quantity;
+                    else if (unit === "OUNCES") totalWeightKg += (weight * 0.0283495) * e.node.quantity;
+                }
+            });
+            if (totalWeightKg <= 0) totalWeightKg = 1; // Default 1kg
+
+            // 4. Find original order in our DB (by Shopify order name e.g., "#1001")
+            const shopifyOrderName = shopifyOrder.name; // e.g., "#1001"
+            const [originalRows] = await db.execute(
+                "SELECT * FROM orders WHERE orderNumber = ? AND clientId = ? AND (orderType IS NULL OR orderType = 'standard') LIMIT 1",
+                [shopifyOrderName, clientId]
+            );
+
+            let originalOrderId = null;
+            if (originalRows.length > 0) {
+                originalOrderId = originalRows[0].id;
+            }
+
+            // Shipper info (the store/merchant)
+            const shipperName = shopData.shop_name || shop;
+            const shipperAddress = shopData.address1 || "";
+            const shipperCity = shopData.city || "Dubai";
+            const shipperCountry = shopData.country || "UAE";
+            const shipperPhone = shopData.phone || "";
+
+            // Consignee info (the customer who is returning)
+            const consigneeName = `${shippingAddr.firstName || customer.firstName || ""} ${shippingAddr.lastName || customer.lastName || ""}`.trim() || "Customer";
+            const consigneePhone = shippingAddr.phone || customer.phone || "";
+            const consigneeAddress = [shippingAddr.address1, shippingAddr.address2].filter(Boolean).join(", ") || "";
+            const consigneeCity = shippingAddr.city || "Unknown";
+            const consigneeCountry = shippingAddr.country || "UAE";
+
+            // Determine service type
+            const serviceType = shopData.default_service_type || "DOM";
+
+            // Determine if exchange
+            const hasExchangeItems = returnObj.exchangeLineItems.edges.length > 0;
+
+            // ===== 5. CREATE RETURN WAYBILL (pickup from customer → deliver to merchant) =====
+            const returnWaybill = await generateNextWaybillNumber();
+
+            const returnOrderNumber = hasExchangeItems
+                ? `EXC-RTN-${shopifyOrderName}`
+                : `RTN-${shopifyOrderName}`;
+
+            console.log(`📦 Creating RETURN waybill ${returnWaybill} for Shopify return ${returnObj.name}`);
+
+            const [returnResult] = await db.execute(
+                `INSERT INTO orders (
+                    clientId, orderNumber, waybillNumber,
+                    shipperName, shipperAddress, shipperCity, shipperCountry, shipperPhone,
+                    customerName, customerPhone, address, city, destinationCountry,
+                    pieces, weight, serviceType, specialInstructions, itemsDescription,
+                    codRequired, codAmount, codCurrency,
+                    status, lastStatusUpdate,
+                    isReturn, originalOrderId, returnCharged, orderType,
+                    shopifyReturnId, source,
+                    createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    clientId,
+                    returnOrderNumber,
+                    returnWaybill,
+
+                    // SWAP: Customer becomes shipper (pickup from customer)
+                    consigneeName,
+                    consigneeAddress,
+                    consigneeCity,
+                    consigneeCountry,
+                    consigneePhone,
+
+                    // SWAP: Merchant becomes consignee (deliver to merchant)
+                    shipperName,
+                    shipperPhone,
+                    shipperAddress,
+                    shipperCity,
+                    shipperCountry,
+
+                    // Package
+                    returnObj.returnLineItems.edges.length || 1,
+                    totalWeightKg,
+                    serviceType,
+                    `SHOPIFY ${hasExchangeItems ? 'EXCHANGE' : ''} RETURN - ${returnObj.name} - Original: ${shopifyOrderName}`,
+                    returnedItems.join(", "),
+
+                    // No COD on returns
+                    0, 0, "AED",
+
+                    // Status
+                    "pending_pickup",
+                    new Date(),
+
+                    // Return flags
+                    1,                    // isReturn
+                    originalOrderId,      // link to original order
+                    1,                    // returnCharged
+                    hasExchangeItems ? "exchange" : "return",
+
+                    // Shopify reference
+                    returnGid,
+                    "shopify",
+
+                    // Timestamps
+                    new Date(),
+                    new Date(),
+                ]
+            );
+
+            const returnOrderId = returnResult.insertId;
+            console.log(`✅ Return waybill ${returnWaybill} created, DB id: ${returnOrderId}`);
+
+            // Create tracking event for return
+            await db.execute(
+                `INSERT INTO trackingEvents (shipmentId, eventDatetime, statusCode, statusLabel, description, createdBy, createdAt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    returnOrderId,
+                    new Date(),
+                    "pending_pickup",
+                    hasExchangeItems ? "EXCHANGE RETURN PENDING PICKUP" : "RETURN PENDING PICKUP",
+                    `Shopify return ${returnObj.name} - Pickup from ${consigneeName} at ${consigneeCity}`,
+                    "shopify",
+                    new Date(),
+                ]
+            );
+
+            // ===== 6. IF EXCHANGE: CREATE NEW SHIPMENT WAYBILL (merchant → customer) =====
+            if (hasExchangeItems) {
+                const exchangeWaybill = await generateNextWaybillNumber();
+                const exchangeItems = returnObj.exchangeLineItems.edges.map(e => {
+                    const item = e.node.lineItem;
+                    return `${item?.title || 'Unknown'} (x${item?.quantity || 1})`;
+                });
+
+                // Calculate exchange items weight
+                let exchangeWeightKg = 0;
+                returnObj.exchangeLineItems.edges.forEach(e => {
+                    const variant = e.node.lineItem?.variant;
+                    const qty = e.node.lineItem?.quantity || 1;
+                    if (variant && variant.weight) {
+                        const weight = variant.weight;
+                        const unit = (variant.weightUnit || "GRAMS").toUpperCase();
+                        if (unit === "GRAMS") exchangeWeightKg += (weight / 1000) * qty;
+                        else if (unit === "KILOGRAMS") exchangeWeightKg += weight * qty;
+                        else if (unit === "POUNDS") exchangeWeightKg += (weight * 0.453592) * qty;
+                        else if (unit === "OUNCES") exchangeWeightKg += (weight * 0.0283495) * qty;
+                    }
+                });
+                if (exchangeWeightKg <= 0) exchangeWeightKg = 1;
+
+                console.log(`📦 Creating EXCHANGE shipment ${exchangeWaybill} for Shopify return ${returnObj.name}`);
+
+                const [exchangeResult] = await db.execute(
+                    `INSERT INTO orders (
+                        clientId, orderNumber, waybillNumber,
+                        shipperName, shipperAddress, shipperCity, shipperCountry, shipperPhone,
+                        customerName, customerPhone, address, city, destinationCountry,
+                        pieces, weight, serviceType, specialInstructions, itemsDescription,
+                        codRequired, codAmount, codCurrency,
+                        status, lastStatusUpdate,
+                        isReturn, originalOrderId, orderType, exchangeOrderId,
+                        shopifyReturnId, source,
+                        createdAt, updatedAt
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        clientId,
+                        `EXC-NEW-${shopifyOrderName}`,
+                        exchangeWaybill,
+
+                        // Shipper is the merchant
+                        shipperName,
+                        shipperAddress,
+                        shipperCity,
+                        shipperCountry,
+                        shipperPhone,
+
+                        // Consignee is the customer (send new items)
+                        consigneeName,
+                        consigneePhone,
+                        consigneeAddress,
+                        consigneeCity,
+                        consigneeCountry,
+
+                        // Package
+                        returnObj.exchangeLineItems.edges.length || 1,
+                        exchangeWeightKg,
+                        serviceType,
+                        `SHOPIFY EXCHANGE NEW - ${returnObj.name} - Original: ${shopifyOrderName}`,
+                        exchangeItems.join(", "),
+
+                        // No COD by default on exchanges
+                        0, 0, "AED",
+
+                        // Status
+                        "pending_pickup",
+                        new Date(),
+
+                        // Exchange flags
+                        0,                    // NOT a return (this is the new delivery)
+                        originalOrderId,      // link to original order
+                        "exchange",
+                        returnOrderId,        // link to the return waybill
+
+                        // Shopify reference
+                        returnGid,
+                        "shopify",
+
+                        // Timestamps
+                        new Date(),
+                        new Date(),
+                    ]
+                );
+
+                const exchangeOrderId = exchangeResult.insertId;
+                console.log(`✅ Exchange shipment ${exchangeWaybill} created, DB id: ${exchangeOrderId}`);
+
+                // Link return order to exchange order
+                await db.execute(
+                    "UPDATE orders SET exchangeOrderId = ? WHERE id = ?",
+                    [exchangeOrderId, returnOrderId]
+                );
+
+                // Create tracking event for exchange
+                await db.execute(
+                    `INSERT INTO trackingEvents (shipmentId, eventDatetime, statusCode, statusLabel, description, createdBy, createdAt)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        exchangeOrderId,
+                        new Date(),
+                        "pending_pickup",
+                        "EXCHANGE NEW SHIPMENT PENDING",
+                        `Shopify exchange new shipment for ${shopifyOrderName} → ${consigneeName} at ${consigneeCity}`,
+                        "shopify",
+                        new Date(),
+                    ]
+                );
+
+                console.log(`🔗 Exchange linked: Return ${returnWaybill} ↔ New ${exchangeWaybill}`);
+            }
+
+            console.log(`🎉 Shopify return ${returnObj.name} fully processed for shop ${shop}`);
+
+        } catch (e) {
+            console.error("⚠️ Error processing return webhook:", e);
+
+            // Save to retry queue
+            try {
+                const bodyString = req.body.toString("utf8");
+                await db.execute(`
+                    INSERT INTO webhook_retries (shop_domain, payload, error_message)
+                    VALUES (?, ?, ?)
+                `, [shop, bodyString, `RETURN: ${e.message}`]);
+                console.log("🛡️ Return webhook saved to retry queue.");
+            } catch (dbErr) {
+                console.error("⛔ CRITICAL Error saving return to retries:", dbErr);
+            }
+        }
+
+        res.sendStatus(200);
+    }
+);
 
 
 // ======================
