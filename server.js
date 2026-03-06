@@ -718,17 +718,19 @@ app.post(
                         returnLineItems(first: 50) {
                             edges {
                                 node {
-                                    id
-                                    quantity
-                                    returnReason
-                                    returnReasonNote
-                                    totalWeight {
-                                        value
-                                        unit
-                                    }
-                                    fulfillmentLineItem {
-                                        lineItem {
-                                            title
+                                    ... on ReturnLineItem {
+                                        id
+                                        quantity
+                                        returnReason
+                                        returnReasonNote
+                                        totalWeight {
+                                            value
+                                            unit
+                                        }
+                                        fulfillmentLineItem {
+                                            lineItem {
+                                                title
+                                            }
                                         }
                                     }
                                 }
