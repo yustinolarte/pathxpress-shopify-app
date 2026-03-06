@@ -722,14 +722,13 @@ app.post(
                                     quantity
                                     returnReason
                                     returnReasonNote
+                                    totalWeight {
+                                        value
+                                        unit
+                                    }
                                     fulfillmentLineItem {
                                         lineItem {
                                             title
-                                            variant {
-                                                title
-                                                weight
-                                                weightUnit
-                                            }
                                         }
                                     }
                                 }
@@ -739,14 +738,10 @@ app.post(
                             edges {
                                 node {
                                     id
-                                    lineItem {
+                                    quantity
+                                    lineItems {
                                         title
                                         quantity
-                                        variant {
-                                            title
-                                            weight
-                                            weightUnit
-                                        }
                                     }
                                 }
                             }
@@ -768,21 +763,21 @@ app.post(
             // Collect returned item descriptions
             const returnedItems = returnObj.returnLineItems.edges.map(e => {
                 const item = e.node;
-                const lineItem = item.fulfillmentLineItem?.lineItem;
-                return `${lineItem?.title || 'Unknown'} (x${item.quantity})`;
+                const title = item.fulfillmentLineItem?.lineItem?.title || 'Unknown';
+                return `${title} (x${item.quantity})`;
             });
 
-            // Calculate total weight from returned items
+            // Calculate total weight from returned items using totalWeight field
             let totalWeightKg = 0;
             returnObj.returnLineItems.edges.forEach(e => {
-                const variant = e.node.fulfillmentLineItem?.lineItem?.variant;
-                if (variant && variant.weight) {
-                    const weight = variant.weight;
-                    const unit = (variant.weightUnit || "GRAMS").toUpperCase();
-                    if (unit === "GRAMS") totalWeightKg += (weight / 1000) * e.node.quantity;
-                    else if (unit === "KILOGRAMS") totalWeightKg += weight * e.node.quantity;
-                    else if (unit === "POUNDS") totalWeightKg += (weight * 0.453592) * e.node.quantity;
-                    else if (unit === "OUNCES") totalWeightKg += (weight * 0.0283495) * e.node.quantity;
+                const tw = e.node.totalWeight;
+                if (tw && tw.value) {
+                    const weight = parseFloat(tw.value);
+                    const unit = (tw.unit || "GRAMS").toUpperCase();
+                    if (unit === "GRAMS") totalWeightKg += weight / 1000;
+                    else if (unit === "KILOGRAMS") totalWeightKg += weight;
+                    else if (unit === "POUNDS") totalWeightKg += weight * 0.453592;
+                    else if (unit === "OUNCES") totalWeightKg += weight * 0.0283495;
                 }
             });
             if (totalWeightKg <= 0) totalWeightKg = 1; // Default 1kg
@@ -911,25 +906,13 @@ app.post(
             if (hasExchangeItems) {
                 const exchangeWaybill = await generateNextWaybillNumber();
                 const exchangeItems = returnObj.exchangeLineItems.edges.map(e => {
-                    const item = e.node.lineItem;
-                    return `${item?.title || 'Unknown'} (x${item?.quantity || 1})`;
-                });
+                    // lineItems is an array of LineItem objects
+                    const items = e.node.lineItems || [];
+                    return items.map(li => `${li?.title || 'Unknown'} (x${li?.quantity || 1})`).join(', ');
+                }).filter(Boolean);
 
-                // Calculate exchange items weight
-                let exchangeWeightKg = 0;
-                returnObj.exchangeLineItems.edges.forEach(e => {
-                    const variant = e.node.lineItem?.variant;
-                    const qty = e.node.lineItem?.quantity || 1;
-                    if (variant && variant.weight) {
-                        const weight = variant.weight;
-                        const unit = (variant.weightUnit || "GRAMS").toUpperCase();
-                        if (unit === "GRAMS") exchangeWeightKg += (weight / 1000) * qty;
-                        else if (unit === "KILOGRAMS") exchangeWeightKg += weight * qty;
-                        else if (unit === "POUNDS") exchangeWeightKg += (weight * 0.453592) * qty;
-                        else if (unit === "OUNCES") exchangeWeightKg += (weight * 0.0283495) * qty;
-                    }
-                });
-                if (exchangeWeightKg <= 0) exchangeWeightKg = 1;
+                // Default weight for exchange items (Shopify doesn't expose variant weight through ExchangeLineItem)
+                let exchangeWeightKg = 1; // Default 1kg
 
                 console.log(`📦 Creating EXCHANGE shipment ${exchangeWaybill} for Shopify return ${returnObj.name}`);
 
