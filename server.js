@@ -697,12 +697,6 @@ app.post(
                         order {
                             id
                             name
-                            customer {
-                                firstName
-                                lastName
-                                phone
-                                email
-                            }
                             shippingAddress {
                                 firstName
                                 lastName
@@ -760,7 +754,6 @@ app.post(
             const returnObj = returnDetails.return;
             const shopifyOrder = returnObj.order;
             const shippingAddr = shopifyOrder.shippingAddress || {};
-            const customer = shopifyOrder.customer || {};
 
             // Collect returned item descriptions
             const returnedItems = returnObj.returnLineItems.edges.map(e => {
@@ -804,8 +797,8 @@ app.post(
             const shipperPhone = shopData.phone || "";
 
             // Consignee info (the customer who is returning)
-            const consigneeName = `${shippingAddr.firstName || customer.firstName || ""} ${shippingAddr.lastName || customer.lastName || ""}`.trim() || "Customer";
-            const consigneePhone = shippingAddr.phone || customer.phone || "";
+            const consigneeName = `${shippingAddr.firstName || ""} ${shippingAddr.lastName || ""}`.trim() || "Customer";
+            const consigneePhone = shippingAddr.phone || "";
             const consigneeAddress = [shippingAddr.address1, shippingAddr.address2].filter(Boolean).join(", ") || "";
             const consigneeCity = shippingAddr.city || "Unknown";
             const consigneeCountry = shippingAddr.country || "UAE";
