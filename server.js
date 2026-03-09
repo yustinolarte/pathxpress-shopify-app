@@ -659,9 +659,9 @@ app.post(
                 return res.sendStatus(200);
             }
 
-            // Only process approved returns (or requests if auto-creating)
-            if (topic !== "returns/approve" && topic !== "returns/request") {
-                console.log(`ℹ️ Return webhook topic ${topic} - no action needed, just logging.`);
+            // Only process APPROVED returns — requests are ignored until staff approves
+            if (topic !== "returns/approve") {
+                console.log(`ℹ️ Return webhook topic ${topic} - ignoring until approved.`);
                 return res.sendStatus(200);
             }
 
@@ -697,6 +697,12 @@ app.post(
                         order {
                             id
                             name
+                            totalOutstandingSet {
+                                shopMoney {
+                                    amount
+                                    currencyCode
+                                }
+                            }
                             shippingAddress {
                                 firstName
                                 lastName
@@ -909,6 +915,20 @@ app.post(
                 // Default weight for exchange items (Shopify doesn't expose variant weight through ExchangeLineItem)
                 let exchangeWeightKg = 1; // Default 1kg
 
+                // Determine COD for exchange: if customer owes money (not paid online), collect on delivery
+                const outstandingAmount = parseFloat(
+                    returnObj.order?.totalOutstandingSet?.shopMoney?.amount || 0
+                );
+                const outstandingCurrency = returnObj.order?.totalOutstandingSet?.shopMoney?.currencyCode || "AED";
+                const exchangeCodRequired = outstandingAmount > 0 ? 1 : 0;
+                const exchangeCodAmount = outstandingAmount > 0 ? outstandingAmount : 0;
+
+                if (exchangeCodRequired) {
+                    console.log(`💰 Exchange has outstanding balance: ${outstandingAmount} ${outstandingCurrency} → setting as COD`);
+                } else {
+                    console.log(`✅ Exchange balance is settled (paid online or no difference) → Prepaid`);
+                }
+
                 console.log(`📦 Creating EXCHANGE shipment ${exchangeWaybill} for Shopify return ${returnObj.name}`);
 
                 const [exchangeResult] = await db.execute(
@@ -949,8 +969,8 @@ app.post(
                         `SHOPIFY EXCHANGE NEW - ${returnObj.name} - Original: ${shopifyOrderName}`,
                         exchangeItems.join(", "),
 
-                        // No COD by default on exchanges
-                        0, 0, "AED",
+                        // COD only if customer owes money (outstanding balance not paid online)
+                        exchangeCodRequired, exchangeCodAmount, outstandingCurrency,
 
                         // Status
                         "pending_pickup",
