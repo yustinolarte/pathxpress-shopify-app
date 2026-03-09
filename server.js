@@ -744,11 +744,8 @@ app.post(
                                     lineItems {
                                         title
                                         quantity
-                                        originalUnitPriceSet {
-                                            shopMoney {
-                                                amount
-                                                currencyCode
-                                            }
+                                        variant {
+                                            price
                                         }
                                     }
                                 }
@@ -931,14 +928,14 @@ app.post(
                 });
 
                 let exchangeTotal = 0;
-                let outstandingCurrency = "AED";
+                let outstandingCurrency = shopData.currency || "AED";
                 returnObj.exchangeLineItems.edges.forEach(e => {
                     const items = e.node.lineItems || [];
                     items.forEach(li => {
-                        const price = parseFloat(li?.originalUnitPriceSet?.shopMoney?.amount || 0);
-                        const currency = li?.originalUnitPriceSet?.shopMoney?.currencyCode || "AED";
+                        // Use variant.price (real product price) — originalUnitPriceSet is 0
+                        // because Shopify applies return credit to the exchange line item price
+                        const price = parseFloat(li?.variant?.price || 0);
                         exchangeTotal += price * (li.quantity || 1);
-                        outstandingCurrency = currency;
                     });
                 });
 
