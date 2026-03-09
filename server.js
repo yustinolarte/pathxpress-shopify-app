@@ -947,8 +947,8 @@ app.post(
                     console.log(`🔗 Found reverse delivery for Shopify return ${returnObj.name}, ID: ${deliveryId}. Injecting tracking: ${returnWaybill}`);
 
                     const updateTrackingMutation = `
-                        mutation reverseDeliveryShippingUpdate($reverseDeliveryId: ID!, $trackingInfo: ReverseDeliveryTrackingInput!) {
-                            reverseDeliveryShippingUpdate(reverseDeliveryId: $reverseDeliveryId, trackingInfo: $trackingInfo) {
+                        mutation reverseDeliveryShippingUpdate($reverseDeliveryId: ID!, $trackingInput: ReverseDeliveryTrackingInput!) {
+                            reverseDeliveryShippingUpdate(reverseDeliveryId: $reverseDeliveryId, trackingInput: $trackingInput) {
                                 reverseDelivery {
                                     id
                                 }
@@ -962,7 +962,7 @@ app.post(
 
                     const trackRes = await shopifyGraphQL(shop, shopData.access_token, updateTrackingMutation, {
                         reverseDeliveryId: deliveryId,
-                        trackingInfo: {
+                        trackingInput: {
                             number: returnWaybill,
                             company: "PathXpress"
                         }
