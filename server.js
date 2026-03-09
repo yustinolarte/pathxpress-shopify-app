@@ -694,15 +694,30 @@ app.post(
                         id
                         status
                         name
+                        suggestedFinancialOutcome {
+                            financialTransfer {
+                                __typename
+                                ... on InvoiceReturnOutcome {
+                                    amount {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
+                                }
+                                ... on RefundReturnOutcome {
+                                    amount {
+                                        shopMoney {
+                                            amount
+                                            currencyCode
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         order {
                             id
                             name
-                            totalOutstandingSet {
-                                shopMoney {
-                                    amount
-                                    currencyCode
-                                }
-                            }
                             shippingAddress {
                                 firstName
                                 lastName
@@ -915,18 +930,24 @@ app.post(
                 // Default weight for exchange items (Shopify doesn't expose variant weight through ExchangeLineItem)
                 let exchangeWeightKg = 1; // Default 1kg
 
-                // Determine COD for exchange: if customer owes money (not paid online), collect on delivery
-                const outstandingAmount = parseFloat(
-                    returnObj.order?.totalOutstandingSet?.shopMoney?.amount || 0
-                );
-                const outstandingCurrency = returnObj.order?.totalOutstandingSet?.shopMoney?.currencyCode || "AED";
+                // Determine COD for exchange using Shopify's suggestedFinancialOutcome
+                // InvoiceReturnOutcome = customer owes money → COD
+                // RefundReturnOutcome  = store owes customer → Prepaid
+                const financialTransfer = returnObj.suggestedFinancialOutcome?.financialTransfer;
+                const isInvoice = financialTransfer?.__typename === "InvoiceReturnOutcome";
+                const outstandingAmount = isInvoice
+                    ? parseFloat(financialTransfer?.amount?.shopMoney?.amount || 0)
+                    : 0;
+                const outstandingCurrency = isInvoice
+                    ? (financialTransfer?.amount?.shopMoney?.currencyCode || "AED")
+                    : "AED";
                 const exchangeCodRequired = outstandingAmount > 0 ? 1 : 0;
                 const exchangeCodAmount = outstandingAmount > 0 ? outstandingAmount : 0;
 
                 if (exchangeCodRequired) {
-                    console.log(`💰 Exchange has outstanding balance: ${outstandingAmount} ${outstandingCurrency} → setting as COD`);
+                    console.log(`💰 Exchange invoice outstanding: ${outstandingAmount} ${outstandingCurrency} → COD`);
                 } else {
-                    console.log(`✅ Exchange balance is settled (paid online or no difference) → Prepaid`);
+                    console.log(`✅ Exchange: no invoice balance (refund or settled) → Prepaid`);
                 }
 
                 console.log(`📦 Creating EXCHANGE shipment ${exchangeWaybill} for Shopify return ${returnObj.name}`);
