@@ -906,6 +906,81 @@ app.post(
                 ]
             );
 
+            // ===== 5.5 INJECT TRACKING INTO SHOPIFY RETURN =====
+            try {
+                // 1. First get the reverseDelivery ID for this return
+                const deliveryTrackerQuery = `
+                    query getReverseDelivery($id: ID!) {
+                        return(id: $id) {
+                            reverseFulfillmentOrders(first: 10) {
+                                edges {
+                                    node {
+                                        reverseDeliveries(first: 10) {
+                                            edges {
+                                                node {
+                                                    id
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                `;
+
+                const deliveryRes = await shopifyGraphQL(shop, shopData.access_token, deliveryTrackerQuery, { id: returnGid });
+
+                // Navigate nested edges to find the first reverse delivery ID
+                let deliveryId = null;
+                const rfoEdges = deliveryRes?.return?.reverseFulfillmentOrders?.edges || [];
+                for (const rfoEdge of rfoEdges) {
+                    const deliveryEdges = rfoEdge?.node?.reverseDeliveries?.edges || [];
+                    if (deliveryEdges.length > 0) {
+                        deliveryId = deliveryEdges[0]?.node?.id;
+                        break;
+                    }
+                }
+
+                // 2. If we found the delivery ID, inject the tracking number
+                if (deliveryId) {
+                    console.log(`🔗 Found reverse delivery for Shopify return ${returnObj.name}, ID: ${deliveryId}. Injecting tracking: ${returnWaybill}`);
+
+                    const updateTrackingMutation = `
+                        mutation reverseDeliveryShippingUpdate($id: ID!, $tracking: ReverseDeliveryTrackingInput!) {
+                            reverseDeliveryShippingUpdate(id: $id, tracking: $tracking) {
+                                reverseDelivery {
+                                    id
+                                }
+                                userErrors {
+                                    field
+                                    message
+                                }
+                            }
+                        }
+                    `;
+
+                    const trackRes = await shopifyGraphQL(shop, shopData.access_token, updateTrackingMutation, {
+                        id: deliveryId,
+                        tracking: {
+                            number: returnWaybill,
+                            company: "PathXpress"
+                        }
+                    });
+
+                    if (trackRes?.reverseDeliveryShippingUpdate?.userErrors?.length) {
+                        console.error('⚠️ Shopify Tracking Injection Errors:', trackRes.reverseDeliveryShippingUpdate.userErrors);
+                    } else {
+                        console.log(`✅ Successfully injected waybill ${returnWaybill} into Shopify return ${returnObj.name}`);
+                    }
+                } else {
+                    console.log(`⚠️ Could not find reverse delivery ID to inject tracking for Shopify return ${returnObj.name}`);
+                }
+            } catch (trackerErr) {
+                console.error(`⛔ Error injecting tracking into Shopify for return ${returnObj.name}:`, trackerErr.message);
+            }
+
+
             // ===== 6. IF EXCHANGE: CREATE NEW SHIPMENT WAYBILL (merchant → customer) =====
             if (hasExchangeItems) {
                 const exchangeWaybill = await generateNextWaybillNumber();
