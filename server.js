@@ -964,7 +964,7 @@ app.post(
                         reverseDeliveryId: deliveryId,
                         trackingInput: {
                             number: returnWaybill,
-                            url: `https://pathxpress.net/track/${returnWaybill}`
+                            url: `https://pathxpress.net/tracking?id=${returnWaybill}`
                         }
                     });
 
