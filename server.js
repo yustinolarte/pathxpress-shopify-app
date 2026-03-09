@@ -694,27 +694,6 @@ app.post(
                         id
                         status
                         name
-                        suggestedFinancialOutcome {
-                            financialTransfer {
-                                __typename
-                                ... on InvoiceReturnOutcome {
-                                    amount {
-                                        shopMoney {
-                                            amount
-                                            currencyCode
-                                        }
-                                    }
-                                }
-                                ... on RefundReturnOutcome {
-                                    amount {
-                                        shopMoney {
-                                            amount
-                                            currencyCode
-                                        }
-                                    }
-                                }
-                            }
-                        }
                         order {
                             id
                             name
@@ -745,6 +724,12 @@ app.post(
                                         fulfillmentLineItem {
                                             lineItem {
                                                 title
+                                                originalUnitPriceSet {
+                                                    shopMoney {
+                                                        amount
+                                                        currencyCode
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -759,6 +744,12 @@ app.post(
                                     lineItems {
                                         title
                                         quantity
+                                        originalUnitPriceSet {
+                                            shopMoney {
+                                                amount
+                                                currencyCode
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -930,24 +921,35 @@ app.post(
                 // Default weight for exchange items (Shopify doesn't expose variant weight through ExchangeLineItem)
                 let exchangeWeightKg = 1; // Default 1kg
 
-                // Determine COD for exchange using Shopify's suggestedFinancialOutcome
-                // InvoiceReturnOutcome = customer owes money → COD
-                // RefundReturnOutcome  = store owes customer → Prepaid
-                const financialTransfer = returnObj.suggestedFinancialOutcome?.financialTransfer;
-                const isInvoice = financialTransfer?.__typename === "InvoiceReturnOutcome";
-                const outstandingAmount = isInvoice
-                    ? parseFloat(financialTransfer?.amount?.shopMoney?.amount || 0)
-                    : 0;
-                const outstandingCurrency = isInvoice
-                    ? (financialTransfer?.amount?.shopMoney?.currencyCode || "AED")
-                    : "AED";
+                // Determine COD for exchange: calculate price difference between exchange items and returned items
+                // If exchangeTotal > returnTotal the customer owes money → COD
+                let returnTotal = 0;
+                returnObj.returnLineItems.edges.forEach(e => {
+                    const li = e.node.fulfillmentLineItem?.lineItem;
+                    const price = parseFloat(li?.originalUnitPriceSet?.shopMoney?.amount || 0);
+                    returnTotal += price * (e.node.quantity || 1);
+                });
+
+                let exchangeTotal = 0;
+                let outstandingCurrency = "AED";
+                returnObj.exchangeLineItems.edges.forEach(e => {
+                    const items = e.node.lineItems || [];
+                    items.forEach(li => {
+                        const price = parseFloat(li?.originalUnitPriceSet?.shopMoney?.amount || 0);
+                        const currency = li?.originalUnitPriceSet?.shopMoney?.currencyCode || "AED";
+                        exchangeTotal += price * (li.quantity || 1);
+                        outstandingCurrency = currency;
+                    });
+                });
+
+                const outstandingAmount = Math.max(0, parseFloat((exchangeTotal - returnTotal).toFixed(2)));
                 const exchangeCodRequired = outstandingAmount > 0 ? 1 : 0;
-                const exchangeCodAmount = outstandingAmount > 0 ? outstandingAmount : 0;
+                const exchangeCodAmount = outstandingAmount;
 
                 if (exchangeCodRequired) {
-                    console.log(`💰 Exchange invoice outstanding: ${outstandingAmount} ${outstandingCurrency} → COD`);
+                    console.log(`💰 Exchange diff: ${exchangeTotal} - ${returnTotal} = ${outstandingAmount} ${outstandingCurrency} → COD`);
                 } else {
-                    console.log(`✅ Exchange: no invoice balance (refund or settled) → Prepaid`);
+                    console.log(`✅ Exchange: no balance due (exchangeTotal=${exchangeTotal} returnTotal=${returnTotal}) → Prepaid`);
                 }
 
                 console.log(`📦 Creating EXCHANGE shipment ${exchangeWaybill} for Shopify return ${returnObj.name}`);
