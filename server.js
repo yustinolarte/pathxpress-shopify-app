@@ -14,14 +14,45 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Pool de conexión a MySQL (Railway)
+// Versión de Shopify Admin API — actualizar aquí cuando Shopify publique nuevas versiones estables
+const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2025-04";
+
+// URL base del portal PathXpress (tracking, API, etc.)
+const PATHXPRESS_TRACKING_URL = process.env.PATHXPRESS_TRACKING_URL || "https://pathxpress.net/tracking";
+
+// Pool de conexión a MySQL
 const db = mysql.createPool({
     host: process.env.DB_HOST,
     port: process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306,
     user: process.env.DB_USER,
     password: process.env.DB_PASS,
     database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 10000,       // 10s para establecer conexión
+    idleTimeout: 60000,          // liberar conexiones inactivas tras 60s
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 30000, // keep-alive cada 30s para evitar drops
 });
+
+// Verificar conectividad al arrancar y aplicar migraciones ligeras
+db.getConnection()
+    .then(async conn => {
+        console.log("✅ Conexión a la base de datos establecida correctamente.");
+        // Migración: agregar columna auto_returns si no existe
+        try {
+            await conn.execute(`ALTER TABLE shopify_shops ADD COLUMN IF NOT EXISTS auto_returns TINYINT(1) NOT NULL DEFAULT 1`);
+            console.log("✅ Migración: columna auto_returns verificada.");
+        } catch (e) {
+            console.warn("⚠️ Migración auto_returns:", e.message);
+        }
+        conn.release();
+    })
+    .catch(err => {
+        console.error("⛔ FATAL: No se pudo conectar a la base de datos:", err.message);
+        process.exit(1);
+    });
 
 // ======================
 // HELPER: Verificar Session Token de Shopify
@@ -70,13 +101,20 @@ function verifySessionToken(token) {
     }
 }
 
-// Middleware para proteger rutas con Session Token
+// Middleware para proteger rutas con Session Token (Shopify App Bridge 2.0+)
 function requireSessionToken(req, res, next) {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        // Si no hay token, intentar con el método tradicional (para compatibilidad)
-        return next();
+        // Sin token: si hay shop en query, intentar leer desde DB (flujo embedded sin token aún)
+        // Pero no exponemos datos sensibles sin verificación
+        const shop = req.query.shop || req.headers["x-shopify-shop-domain"];
+        if (shop) {
+            // Permitir acceso solo si el shop existe en DB (ya instalado)
+            // La verificación real ocurre en cada handler con getShopFromDB
+            return next();
+        }
+        return res.status(401).json({ error: "Unauthorized: No session token" });
     }
 
     const token = authHeader.split(' ')[1];
@@ -140,28 +178,8 @@ async function saveShipmentToMySQL(shipment) {
 // ======================
 async function saveShipmentToOrdersTable(shipment) {
     try {
-        // 1. Generar Waybill Number
-        // Buscamos el último que empiece por PX2025...
-        const [rows] = await db.execute(
-            "SELECT waybillNumber FROM orders WHERE waybillNumber LIKE 'PX2025%' ORDER BY id DESC LIMIT 1"
-        );
-
-        let nextSequence = 1;
-        if (rows.length > 0 && rows[0].waybillNumber) {
-            const lastWaybill = rows[0].waybillNumber;
-            // Asumiendo formato PX2025xxxxxx
-            // Quitamos 'PX2025' y parseamos el resto
-            const suffix = lastWaybill.replace("PX2025", "");
-            const seq = parseInt(suffix, 10);
-            if (!isNaN(seq)) {
-                nextSequence = seq + 1;
-            }
-        }
-
-        // Pad con ceros, ej: 00001
-        const sequenceStr = nextSequence.toString().padStart(5, '0');
-        const newWaybillNumber = `PX2025${sequenceStr}`;
-
+        // 1. Generar Waybill Number de forma atómica
+        const newWaybillNumber = await generateNextWaybillNumber();
         console.log("🔢 Generated Waybill:", newWaybillNumber);
 
         const [result] = await db.execute(
@@ -398,8 +416,7 @@ async function getShopFromDB(shopDomain) {
 // HELPER: GraphQL Admin API para Shopify
 // ======================
 async function shopifyGraphQL(shop, accessToken, query, variables = {}) {
-    const apiVersion = "2025-10";
-    const url = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
+    const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
 
     const response = await fetch(url, {
         method: "POST",
@@ -421,24 +438,43 @@ async function shopifyGraphQL(shop, accessToken, query, variables = {}) {
 }
 
 // ======================
-// HELPER: Generar Waybill Number para returns/exchanges desde Shopify
+// HELPER: Generar Waybill Number de forma atómica (sin race conditions)
+// Usa la tabla waybill_sequences para generar secuencias únicas con AUTO_INCREMENT
 // ======================
 async function generateNextWaybillNumber() {
-    const [rows] = await db.execute(
-        "SELECT waybillNumber FROM orders WHERE waybillNumber LIKE 'PX2025%' ORDER BY id DESC LIMIT 1"
-    );
+    const year = new Date().getFullYear();
+    const prefix = `PX${year}`;
 
-    let nextSequence = 1;
-    if (rows.length > 0 && rows[0].waybillNumber) {
-        const suffix = rows[0].waybillNumber.replace("PX2025", "");
-        const seq = parseInt(suffix, 10);
-        if (!isNaN(seq)) {
-            nextSequence = seq + 1;
-        }
+    // INSERT atómico: incrementa el contador en DB y obtiene el nuevo valor
+    // Requiere tabla: CREATE TABLE IF NOT EXISTS waybill_sequences (prefix VARCHAR(10) PRIMARY KEY, last_seq INT NOT NULL DEFAULT 0)
+    const conn = await db.getConnection();
+    try {
+        await conn.beginTransaction();
+
+        // Upsert: si no existe la fila del año, la crea; si existe, incrementa
+        await conn.execute(
+            `INSERT INTO waybill_sequences (prefix, last_seq)
+             VALUES (?, 1)
+             ON DUPLICATE KEY UPDATE last_seq = last_seq + 1`,
+            [prefix]
+        );
+
+        const [[row]] = await conn.execute(
+            "SELECT last_seq FROM waybill_sequences WHERE prefix = ?",
+            [prefix]
+        );
+
+        await conn.commit();
+
+        const seq = row.last_seq;
+        const sequenceStr = seq.toString().padStart(5, '0');
+        return `${prefix}${sequenceStr}`;
+    } catch (err) {
+        await conn.rollback();
+        throw err;
+    } finally {
+        conn.release();
     }
-
-    const sequenceStr = nextSequence.toString().padStart(5, '0');
-    return `PX2025${sequenceStr}`;
 }
 
 // Tokens en memoria por tienda
@@ -499,49 +535,88 @@ app.post("/webhooks/shopify", webhookMiddleware, (req, res) => {
     const shop = req.headers["x-shopify-shop-domain"];
 
     console.log(`🔒 GDPR Webhook received - Topic: ${topic}, Shop: ${shop}`);
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Body:", req.body.toString());
 
-    switch (topic) {
-        case "customers/data_request":
-            console.log("📋 Processing Customer Data Request");
-            // Here you would collect and return customer data if you store any
-            break;
-        case "customers/redact":
-            console.log("🗑️ Processing Customer Redact Request");
-            // Here you would delete customer data if you store any
-            break;
-        case "shop/redact":
-            console.log("🏪 Processing Shop Redact Request");
-            // Here you would delete shop data after uninstall (48 hours later)
-            break;
-        default:
-            console.log(`⚠️ Unknown GDPR topic: ${topic}`);
-    }
-
+    // Procesamos de forma asíncrona pero respondemos 200 inmediatamente (requerido por Shopify)
     res.status(200).send();
-});
 
-// --- GDPR / Mandatory Webhooks (Legacy individual endpoints) ---
-app.post("/webhooks/shopify/customers/data_request", webhookMiddleware, (req, res) => {
-    console.log("🔒 GDPR: Customer Data Request received");
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Body:", req.body.toString());
-    res.status(200).send();
-});
+    // Procesar en background sin bloquear la respuesta
+    setImmediate(async () => {
+        try {
+            const bodyStr = req.body.toString("utf8");
+            let payload = {};
+            try { payload = JSON.parse(bodyStr); } catch (_) {}
 
-app.post("/webhooks/shopify/customers/redact", webhookMiddleware, (req, res) => {
-    console.log("🔒 GDPR: Customer Redact received");
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Body:", req.body.toString());
-    res.status(200).send();
-});
+            switch (topic) {
+                case "customers/data_request": {
+                    // Shopify nos pide reportar qué datos tenemos del cliente
+                    // Nuestro app almacena datos en: shopify_shipments y tabla orders
+                    const customerId = payload.customer?.id;
+                    const customerEmail = payload.customer?.email;
+                    console.log(`📋 GDPR data_request: customer ${customerId} (${customerEmail}) from shop ${shop}`);
+                    // No almacenamos datos sensibles de clientes más allá de lo que Shopify envía en webhooks.
+                    // Los datos de envío (nombre, teléfono, dirección) están en shopify_shipments y orders.
+                    break;
+                }
 
-app.post("/webhooks/shopify/shop/redact", webhookMiddleware, (req, res) => {
-    console.log("🔒 GDPR: Shop Redact received");
-    console.log("Headers:", JSON.stringify(req.headers, null, 2));
-    console.log("Body:", req.body.toString());
-    res.status(200).send();
+                case "customers/redact": {
+                    // Shopify nos pide borrar datos personales del cliente
+                    const customerId = payload.customer?.id;
+                    const customerEmail = payload.customer?.email;
+                    console.log(`🗑️ GDPR customers/redact: anonimizando cliente ${customerId} en shop ${shop}`);
+
+                    if (customerId || customerEmail) {
+                        // Anonimizar datos personales en shipments de este cliente
+                        // Buscamos por nombre/teléfono vinculado al shop y orden
+                        const orderIds = (payload.orders_to_redact || []).map(o => String(o.id));
+                        if (orderIds.length > 0) {
+                            const placeholders = orderIds.map(() => '?').join(',');
+                            await db.execute(
+                                `UPDATE shopify_shipments
+                                 SET consignee_name = '[REDACTED]',
+                                     consignee_phone = '[REDACTED]',
+                                     address_line1 = '[REDACTED]'
+                                 WHERE shop_domain = ? AND shop_order_id IN (${placeholders})`,
+                                [shop, ...orderIds]
+                            );
+                            // También anonimizar en tabla orders del portal
+                            const orderNames = (payload.orders_to_redact || []).map(o => o.name).filter(Boolean);
+                            if (orderNames.length > 0) {
+                                const namePlaceholders = orderNames.map(() => '?').join(',');
+                                await db.execute(
+                                    `UPDATE orders
+                                     SET customerName = '[REDACTED]',
+                                         customerPhone = '[REDACTED]',
+                                         address = '[REDACTED]'
+                                     WHERE orderNumber IN (${namePlaceholders})`,
+                                    orderNames
+                                );
+                            }
+                        }
+                        console.log(`✅ GDPR redact completado para cliente ${customerId} en shop ${shop}`);
+                    }
+                    break;
+                }
+
+                case "shop/redact": {
+                    // Shopify nos pide borrar todos los datos de la tienda (48h después de desinstalar)
+                    console.log(`🏪 GDPR shop/redact: eliminando datos de tienda ${shop}`);
+                    await db.execute("DELETE FROM shopify_shipments WHERE shop_domain = ?", [shop]);
+                    await db.execute("DELETE FROM shopify_shops WHERE shop_domain = ?", [shop]);
+                    // Eliminar también de la cola de reintentos
+                    await db.execute("DELETE FROM webhook_retries WHERE shop_domain = ?", [shop]);
+                    // Limpiar token en memoria si existe
+                    delete shopsTokens[shop];
+                    console.log(`✅ GDPR shop/redact completado: datos de ${shop} eliminados`);
+                    break;
+                }
+
+                default:
+                    console.log(`⚠️ GDPR: topic desconocido: ${topic}`);
+            }
+        } catch (gdprErr) {
+            console.error(`⛔ Error procesando GDPR webhook ${topic}:`, gdprErr.message);
+        }
+    });
 });
 
 // --- Order Webhook ---
@@ -669,6 +744,12 @@ app.post(
             const shopData = await getShopFromDB(shop);
             if (!shopData || !shopData.access_token) {
                 console.log(`⚠️ Shop ${shop} not found in DB or no access token. Skipping return.`);
+                return res.sendStatus(200);
+            }
+
+            // Check if auto-returns is enabled for this shop
+            if (shopData.auto_returns === 0) {
+                console.log(`⏸️ Auto-returns disabled for ${shop}. Return webhook ignored.`);
                 return res.sendStatus(200);
             }
 
@@ -964,7 +1045,7 @@ app.post(
                         reverseDeliveryId: deliveryId,
                         trackingInput: {
                             number: returnWaybill,
-                            url: `https://pathxpress.net/tracking?id=${returnWaybill}`
+                            url: `${PATHXPRESS_TRACKING_URL}?id=${returnWaybill}`
                         }
                     });
 
@@ -998,23 +1079,26 @@ app.post(
                 let returnTotal = 0;
                 returnObj.returnLineItems.edges.forEach(e => {
                     const li = e.node.fulfillmentLineItem?.lineItem;
-                    const price = parseFloat(li?.originalUnitPriceSet?.shopMoney?.amount || 0);
-                    returnTotal += price * (e.node.quantity || 1);
+                    const rawPrice = li?.originalUnitPriceSet?.shopMoney?.amount;
+                    const price = rawPrice !== undefined && rawPrice !== null ? parseFloat(rawPrice) : 0;
+                    if (!isNaN(price)) returnTotal += price * (e.node.quantity || 1);
                 });
 
                 let exchangeTotal = 0;
-                let outstandingCurrency = shopData.currency || "AED";
+                const outstandingCurrency = shopData.currency || "AED";
                 returnObj.exchangeLineItems.edges.forEach(e => {
                     const items = e.node.lineItems || [];
                     items.forEach(li => {
                         // Use variant.price (real product price) — originalUnitPriceSet is 0
                         // because Shopify applies return credit to the exchange line item price
-                        const price = parseFloat(li?.variant?.price || 0);
-                        exchangeTotal += price * (li.quantity || 1);
+                        const rawPrice = li?.variant?.price;
+                        const price = rawPrice !== undefined && rawPrice !== null ? parseFloat(rawPrice) : 0;
+                        if (!isNaN(price)) exchangeTotal += price * (li.quantity || 1);
                     });
                 });
 
-                const outstandingAmount = Math.max(0, parseFloat((exchangeTotal - returnTotal).toFixed(2)));
+                const diff = exchangeTotal - returnTotal;
+                const outstandingAmount = isNaN(diff) ? 0 : Math.max(0, parseFloat(diff.toFixed(2)));
                 const exchangeCodRequired = outstandingAmount > 0 ? 1 : 0;
                 const exchangeCodAmount = outstandingAmount;
 
@@ -1176,6 +1260,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
     // Obtener configuración actual de la DB
     let currentClientId = "";
     let currentAutoSync = true;
+    let currentAutoReturns = true;
     let currentSyncTag = "";
     let currentServiceType = "DOM"; // Default service type
     let freeShippingDOM = ""; // Umbral para envío gratis Standard
@@ -1190,6 +1275,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
         if (shopData) {
             currentClientId = shopData.pathxpress_client_id;
             currentAutoSync = shopData.auto_sync !== 0; // MySQL boolean is 0/1
+            currentAutoReturns = shopData.auto_returns !== 0; // Default true if column is NULL
             currentServiceType = shopData.default_service_type || "DOM";
             currentSyncTag = shopData.sync_tag || "";
             freeShippingDOM = shopData.free_shipping_threshold_dom || "";
@@ -1198,9 +1284,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
         // 1.5 Check if Carrier Service is registered
         try {
-            const apiVersion = "2024-07";
             const carrierRes = await fetch(
-                `https://${shop}/admin/api/${apiVersion}/carrier_services.json`,
+                `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services.json`,
                 { headers: { "X-Shopify-Access-Token": shopData.access_token } }
             );
             const carrierData = await carrierRes.json();
@@ -1315,15 +1400,21 @@ app.get("/app", requireSessionToken, async (req, res) => {
             }
 
             const [rows] = await db.execute(`
-                SELECT 
-                    s.shop_order_name, 
+                SELECT
+                    s.shop_order_name,
                     s.items_description,
-                    o.*
+                    o.id, o.waybillNumber, o.customerName, o.customerPhone,
+                    o.address, o.city, o.emirate, o.destinationCountry,
+                    o.shipperName, o.shipperAddress, o.shipperCity, o.shipperCountry, o.shipperPhone,
+                    o.pieces, o.weight, o.length, o.width, o.height,
+                    o.serviceType, o.status, o.createdAt,
+                    o.codRequired, o.codAmount, o.codCurrency,
+                    o.isReturn, o.orderType
                 FROM shopify_shipments s
                 JOIN orders o ON (o.orderNumber = s.shop_order_name)
                 WHERE s.shop_domain = ?
                 ORDER BY s.id DESC
-                LIMIT 20
+                LIMIT 50
             `, [shop]);
 
             if (rows.length > 0) {
@@ -1355,19 +1446,50 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         itemsDescription: row.items_description
                     }).replace(/"/g, '&quot;');
 
+                    // Determine type badge
+                    let typeLabel, typeBadgeStyle, typeKey;
+                    if (row.isReturn && row.orderType === 'exchange') {
+                        typeLabel = 'Exchange';
+                        typeBadgeStyle = 'background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);';
+                        typeKey = 'exchange';
+                    } else if (row.isReturn) {
+                        typeLabel = 'Return';
+                        typeBadgeStyle = 'background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);';
+                        typeKey = 'return';
+                    } else {
+                        typeLabel = 'Shipment';
+                        typeBadgeStyle = 'background:rgba(45,108,246,0.2);color:#2D6CF6;border:1px solid rgba(45,108,246,0.3);';
+                        typeKey = 'shipment';
+                    }
+
+                    // Status badge color
+                    let statusStyle;
+                    if (row.status === 'DELIVERED') {
+                        statusStyle = 'background:rgba(34,197,94,0.2);color:#22c55e;border:1px solid rgba(34,197,94,0.3);';
+                    } else if (row.status === 'PENDING_PICKUP') {
+                        statusStyle = 'background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);';
+                    } else if (['CANCELLED','RETURNED'].includes(row.status)) {
+                        statusStyle = 'background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);';
+                    } else {
+                        statusStyle = 'background:rgba(45,108,246,0.2);color:#2D6CF6;border:1px solid rgba(45,108,246,0.3);';
+                    }
+
+                    // COD display
+                    const codDisplay = row.codRequired && row.codAmount
+                        ? `<span style="color:#f59e0b;font-weight:600;">${parseFloat(row.codAmount).toFixed(0)} ${row.codCurrency || 'AED'}</span>`
+                        : '<span style="color:var(--text-muted);">---</span>';
+
                     const deleteBtn = row.status === 'PENDING_PICKUP'
-                        ? `<button class="delete-btn" onclick="deleteOrder(${row.id}, '${row.shop_order_name}')" title="Delete Order"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
+                        ? `<button class="delete-btn" onclick="deleteOrder(${row.id}, '${row.shop_order_name}')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
                         : '';
 
                     return `
-                    <tr id="order-row-${row.id}">
+                    <tr id="order-row-${row.id}" data-type="${typeKey}">
                         <td><strong style="color: var(--text-primary);">${row.shop_order_name}</strong></td>
                         <td><span style="color: var(--blue-electric); font-weight: 600;">${row.waybillNumber || '---'}</span></td>
-                        <td>
-                            <span class="badge badge-status">
-                                ${row.status}
-                            </span>
-                        </td>
+                        <td><span class="badge" style="${typeBadgeStyle}">${typeLabel}</span></td>
+                        <td><span class="badge" style="${statusStyle}">${row.status}</span></td>
+                        <td>${codDisplay}</td>
                         <td>${new Date(row.createdAt).toLocaleDateString()}</td>
                         <td style="display: flex; gap: 8px; align-items: center;">
                             ${row.waybillNumber
@@ -1715,6 +1837,27 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 background: rgba(225, 6, 0, 0.15);
                 transform: none;
                 box-shadow: none;
+            }
+
+            .tab-btn {
+                background: transparent;
+                color: var(--text-muted);
+                border: none;
+                cursor: pointer;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                box-shadow: none;
+            }
+            .tab-btn:hover {
+                color: var(--text-primary);
+                background: rgba(255,255,255,0.07);
+                transform: none;
+                box-shadow: none;
+            }
+            .tab-active {
+                background: var(--blue-electric) !important;
+                color: #fff !important;
+                box-shadow: 0 2px 8px rgba(45,108,246,0.35) !important;
             }
             
             .settings-section {
@@ -2385,10 +2528,21 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         <p class="helper-text">
                             If disabled, only orders with the specified Tag below will be synced.
                         </p>
-                        
+
                         <label for="sync_tag" style="margin-top:16px;">Required Tag (Optional):</label>
                         <input type="text" id="sync_tag" name="sync_tag" placeholder="e.g., send_pathxpress" value="${currentSyncTag}" />
                         <p class="helper-text" style="margin-left:0;">If you enter a tag (e.g., "send_pathxpress"), ONLY orders with that tag in Shopify will be synced.</p>
+                    </div>
+
+                    <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="refresh-ccw" class="icon icon-sm"></i>Returns &amp; Exchanges</h3>
+                    <div class="settings-section">
+                        <div class="checkbox-wrapper">
+                            <input type="checkbox" name="auto_returns" value="1" id="auto_returns" ${currentAutoReturns ? 'checked' : ''} />
+                            <label style="margin-bottom:0;">Automatically process approved returns &amp; exchanges</label>
+                        </div>
+                        <p class="helper-text">
+                            When enabled, any return or exchange approved in Shopify is automatically sent to PathXpress for pickup. Disable this if you want to review and manage returns manually from the shipments panel.
+                        </p>
                     </div>
 
                     <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="truck" class="icon icon-sm"></i>Default Shipping Service</h3>
@@ -2457,21 +2611,35 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
               <div class="card">
                 <h2><i data-lucide="package" class="icon"></i>My PathXpress Shipments</h2>
-                <p style="margin-bottom:16px;">Last 20 processed shipments.</p>
-                <table>
+
+                <!-- Filter tabs + search -->
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
+                    <div style="display:flex; background:rgba(255,255,255,0.05); border-radius:10px; padding:4px; gap:4px; border:1px solid var(--border-color);">
+                        <button onclick="filterTable('all')" id="tab-all" class="tab-btn tab-active" style="padding:6px 16px; font-size:13px; border-radius:7px;">All</button>
+                        <button onclick="filterTable('shipment')" id="tab-shipment" class="tab-btn" style="padding:6px 16px; font-size:13px; border-radius:7px;">Shipments</button>
+                        <button onclick="filterTable('return')" id="tab-return" class="tab-btn" style="padding:6px 16px; font-size:13px; border-radius:7px;">Returns</button>
+                        <button onclick="filterTable('exchange')" id="tab-exchange" class="tab-btn" style="padding:6px 16px; font-size:13px; border-radius:7px;">Exchanges</button>
+                    </div>
+                    <input type="text" id="shipment-search" onkeyup="searchTable()" placeholder="Search order # or waybill..." style="flex:1; min-width:180px; max-width:300px; margin-bottom:0; padding:8px 14px; font-size:13px;" />
+                </div>
+
+                <table id="shipments-table">
                     <thead>
                         <tr>
                             <th>Order #</th>
                             <th>Waybill</th>
+                            <th>Type</th>
                             <th>Status</th>
+                            <th>COD</th>
                             <th>Date</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="shipments-tbody">
                         ${shipmentsRows}
                     </tbody>
                 </table>
+                <p id="no-results-msg" style="display:none; color:var(--text-muted); text-align:center; padding:20px;">No shipments found.</p>
               </div>
             `
             : `
@@ -2492,6 +2660,36 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 }
             });
             
+            // Filter table by type tab
+            let activeFilter = 'all';
+            function filterTable(type) {
+                activeFilter = type;
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('tab-active'));
+                document.getElementById('tab-' + type).classList.add('tab-active');
+                applyFilters();
+            }
+
+            // Search table by order # or waybill
+            function searchTable() {
+                applyFilters();
+            }
+
+            function applyFilters() {
+                const query = (document.getElementById('shipment-search')?.value || '').toLowerCase();
+                const rows = document.querySelectorAll('#shipments-tbody tr');
+                let visibleCount = 0;
+                rows.forEach(row => {
+                    const typeMatch = activeFilter === 'all' || row.dataset.type === activeFilter;
+                    const text = row.textContent.toLowerCase();
+                    const searchMatch = !query || text.includes(query);
+                    const show = typeMatch && searchMatch;
+                    row.style.display = show ? '' : 'none';
+                    if (show) visibleCount++;
+                });
+                const noMsg = document.getElementById('no-results-msg');
+                if (noMsg) noMsg.style.display = visibleCount === 0 ? 'block' : 'none';
+            }
+
             // Delete Order Function (Only for PENDING_PICKUP orders)
             async function deleteOrder(orderId, orderName) {
                 if (!confirm(\`Are you sure you want to delete order \${orderName}?\\n\\nThis action cannot be undone and will remove the order from PathXpress.\`)) {
@@ -2628,13 +2826,14 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
         return res.status(401).json({ success: false, message: "Unauthorized: Missing shop or valid session." });
     }
 
-    const { clientId, default_service_type, auto_sync, sync_tag, free_shipping_dom, free_shipping_express } = req.body;
+    const { clientId, default_service_type, auto_sync, sync_tag, free_shipping_dom, free_shipping_express, auto_returns } = req.body;
 
     if (!clientId) {
         return res.status(400).json({ success: false, message: "Error: Missing Client ID." });
     }
 
     const isAutoSync = auto_sync === "1" || auto_sync === true ? 1 : 0;
+    const isAutoReturns = auto_returns === "1" || auto_returns === true ? 1 : 0;
     const serviceType = default_service_type || "DOM";
     const freeShippingDOMValue = free_shipping_dom && parseFloat(free_shipping_dom) > 0
         ? parseFloat(free_shipping_dom)
@@ -2646,8 +2845,8 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     try {
         // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express)
-             VALUES(?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express, auto_returns)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 pathxpress_client_id = VALUES(pathxpress_client_id),
     default_service_type = VALUES(default_service_type),
@@ -2655,10 +2854,11 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     sync_tag = VALUES(sync_tag),
     free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
     free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
+    auto_returns = VALUES(auto_returns),
     updated_at = CURRENT_TIMESTAMP`,
-            [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingDOMValue, freeShippingExpressValue]
+            [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingDOMValue, freeShippingExpressValue, isAutoReturns]
         );
-        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync} `);
+        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync}, AutoReturns = ${isAutoReturns}`);
 
         // Return JSON success
         res.json({ success: true, message: "Settings saved successfully" });
@@ -3122,14 +3322,10 @@ app.get("/auth/callback", async (req, res) => {
     const tokenData = await tokenResponse.json();
     const accessToken = tokenData.access_token;
 
-    console.log("🔥 SHOP INSTALLED:");
-    console.log("Shop:", shop);
-    console.log("Access Token:", accessToken);
+    console.log(`🔥 SHOP INSTALLED: ${shop}`);
     console.log("🔑 Scopes Granted:", tokenData.scope);
-    console.log("🔑 ENV SCOPES:", process.env.SCOPES);
 
     shopsTokens[shop] = accessToken;
-    console.log("Tokens saved in memory:", shopsTokens);
 
     // Registrar webhook
     await registerOrderWebhook(shop, accessToken);
@@ -3230,8 +3426,7 @@ app.get("/shopify/orders-test", async (req, res) => {
     }
 
     try {
-        const apiVersion = "2024-07";
-        const url = `https://${shop}/admin/api/${apiVersion}/orders.json?limit=5&status=any`;
+        const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=5&status=any`;
 
         console.log("👉 Calling Shopify:", url);
 
@@ -3304,14 +3499,13 @@ app.get("/shopify/orders-test", async (req, res) => {
 // 8) REGISTRO DEL WEBHOOK
 // ======================
 async function registerOrderWebhook(shop, accessToken) {
-    const apiVersion = "2024-07";
     const webhookUrl = `${process.env.APP_URL}/webhooks/shopify/orders`;
 
     console.log("📡 Registering webhook for shop:", shop);
     console.log("📡 Webhook URL:", webhookUrl);
 
     const response = await fetch(
-        `https://${shop}/admin/api/${apiVersion}/webhooks.json`,
+        `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json`,
         {
             method: "POST",
             headers: {
@@ -3340,7 +3534,6 @@ async function registerOrderWebhook(shop, accessToken) {
 // 8.1) REGISTRO CARRIER SERVICE (con detección de errores)
 // ======================
 async function registerCarrierService(shop, accessToken) {
-    const apiVersion = "2024-07";
     const callbackUrl = `${process.env.APP_URL}/api/shipping-rates`;
 
     console.log("🚚 Registering/Verifying CarrierService in:", shop);
@@ -3348,7 +3541,7 @@ async function registerCarrierService(shop, accessToken) {
 
     try {
         // 1. Verificar si ya existe
-        const getRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services.json`, {
+        const getRes = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services.json`, {
             headers: { "X-Shopify-Access-Token": accessToken }
         });
         const getData = await getRes.json();
@@ -3362,7 +3555,7 @@ async function registerCarrierService(shop, accessToken) {
             // Update callback URL if it changed (reinstall with different domain)
             if (existing.callback_url !== callbackUrl) {
                 console.log("🔧 Updating CarrierService callback_url...");
-                const updateRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services/${existing.id}.json`, {
+                const updateRes = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services/${existing.id}.json`, {
                     method: "PUT",
                     headers: {
                         "X-Shopify-Access-Token": accessToken,
@@ -3388,7 +3581,7 @@ async function registerCarrierService(shop, accessToken) {
             } else if (!existing.active) {
                 // Reactivate if disabled
                 console.log("🔧 Reactivating CarrierService...");
-                await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services/${existing.id}.json`, {
+                await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services/${existing.id}.json`, {
                     method: "PUT",
                     headers: {
                         "X-Shopify-Access-Token": accessToken,
@@ -3408,7 +3601,7 @@ async function registerCarrierService(shop, accessToken) {
 
         // 2. Crear si no existe
         console.log("📦 Creating new CarrierService...");
-        const response = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services.json`, {
+        const response = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services.json`, {
             method: "POST",
             headers: {
                 "X-Shopify-Access-Token": accessToken,
@@ -3465,9 +3658,8 @@ app.get("/debug/carrier/:shop", async (req, res) => {
             });
         }
 
-        const apiVersion = "2024-07";
         const response = await fetch(
-            `https://${shop}/admin/api/${apiVersion}/carrier_services.json`,
+            `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services.json`,
             { headers: { "X-Shopify-Access-Token": shopData.access_token } }
         );
         const data = await response.json();
@@ -3500,12 +3692,11 @@ app.get("/debug/carrier/:shop", async (req, res) => {
 // 8.3) SETUP FIXED RATES (FALLBACK)
 // ======================
 async function setupFixedRates(shop, accessToken) {
-    const apiVersion = "2024-07";
     console.log(`🛠️ Setting up Fixed Rates for ${shop}...`);
 
     try {
         // 1. Get Shipping Zones
-        const zoneRes = await fetch(`https://${shop}/admin/api/${apiVersion}/shipping_zones.json`, {
+        const zoneRes = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/shipping_zones.json`, {
             headers: { "X-Shopify-Access-Token": accessToken }
         });
         const zoneData = await zoneRes.json();
@@ -3516,7 +3707,7 @@ async function setupFixedRates(shop, accessToken) {
 
         if (!uaeZone) {
             console.log("Creating new shipping zone for UAE...");
-            const createZoneRes = await fetch(`https://${shop}/admin/api/${apiVersion}/shipping_zones.json`, {
+            const createZoneRes = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/shipping_zones.json`, {
                 method: "POST",
                 headers: {
                     "X-Shopify-Access-Token": accessToken,
@@ -3555,7 +3746,7 @@ async function setupFixedRates(shop, accessToken) {
         // 3. Add Rates to UAE Zone
         // Standard Delivery
         console.log("Adding Standard Delivery rate...");
-        await fetch(`https://${shop}/admin/api/${apiVersion}/shipping_zones/${uaeZone.id}/price_based_shipping_rates.json`, {
+        await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/shipping_zones/${uaeZone.id}/price_based_shipping_rates.json`, {
             method: "POST",
             headers: {
                 "X-Shopify-Access-Token": accessToken,
@@ -3572,7 +3763,7 @@ async function setupFixedRates(shop, accessToken) {
 
         // Express Delivery
         console.log("Adding Express Delivery rate...");
-        await fetch(`https://${shop}/admin/api/${apiVersion}/shipping_zones/${uaeZone.id}/price_based_shipping_rates.json`, {
+        await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/shipping_zones/${uaeZone.id}/price_based_shipping_rates.json`, {
             method: "POST",
             headers: {
                 "X-Shopify-Access-Token": accessToken,
@@ -3598,7 +3789,6 @@ async function setupFixedRates(shop, accessToken) {
 // Endpoint para FORZAR re-registro del Carrier Service (con diagnóstico completo)
 app.get("/fix/carrier/:shop", async (req, res) => {
     const shop = req.params.shop;
-    const apiVersion = "2024-07";
     const callbackUrl = `${process.env.APP_URL}/api/shipping-rates`;
 
     try {
@@ -3615,7 +3805,7 @@ app.get("/fix/carrier/:shop", async (req, res) => {
         const accessToken = shopData.access_token;
 
         // 1. Primero verificar si ya existe
-        const getRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services.json`, {
+        const getRes = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services.json`, {
             headers: { "X-Shopify-Access-Token": accessToken }
         });
         const getResText = await getRes.text();
@@ -3637,7 +3827,7 @@ app.get("/fix/carrier/:shop", async (req, res) => {
 
         if (existing) {
             // Ya existe, intentar reactivar/actualizar
-            const updateRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services/${existing.id}.json`, {
+            const updateRes = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services/${existing.id}.json`, {
                 method: "PUT",
                 headers: {
                     "X-Shopify-Access-Token": accessToken,
@@ -3666,7 +3856,7 @@ app.get("/fix/carrier/:shop", async (req, res) => {
         }
 
         // 2. Crear nuevo Carrier Service
-        const createRes = await fetch(`https://${shop}/admin/api/${apiVersion}/carrier_services.json`, {
+        const createRes = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/carrier_services.json`, {
             method: "POST",
             headers: {
                 "X-Shopify-Access-Token": accessToken,
@@ -3757,49 +3947,6 @@ async function processRetryQueue() {
         }
     } catch (err) {
         console.error("⛔ Error in retry cycle:", err);
-    }
-}
-
-// ======================
-// HELPER: Calcular Tarifas desde Tiers
-// ======================
-async function calculateFromTiers_DISABLED(db, tierId, clientId, serviceCode, weightKg) {
-    // Default fallback values
-    const isSdd = serviceCode === 'SDD' || serviceCode === 'SAMEDAY';
-    const defaultBase = isSdd ? 25 : 15;
-    const defaultPerKg = isSdd ? 3 : 2;
-
-    if (!tierId) {
-        return defaultBase + (Math.max(0, weightKg - 5) * defaultPerKg);
-    }
-
-    try {
-        // Intentamos leer de rateTiers
-        // NOTA: Ajustar nombres de columnas según schema real. 
-        // Se asume: sddBasePrice, sddPerKg, domBasePrice, domPerKg
-        const [rows] = await db.execute("SELECT * FROM rateTiers WHERE id = ?", [tierId]);
-
-        if (rows.length === 0) {
-            console.warn(`⚠️ Rate Tier ${tierId} not found, using defaults.`);
-            return defaultBase + (Math.max(0, weightKg - 5) * defaultPerKg);
-        }
-
-        const tier = rows[0];
-
-        const base = isSdd
-            ? (parseFloat(tier.sddBasePrice || tier.sdd_base_price || 25))
-            : (parseFloat(tier.domBasePrice || tier.dom_base_price || 15));
-
-        const perKg = isSdd
-            ? (parseFloat(tier.sddPerKg || tier.sdd_per_kg || 3))
-            : (parseFloat(tier.domPerKg || tier.dom_per_kg || 2));
-
-        const price = base + (Math.max(0, weightKg - 5) * perKg);
-        return price;
-
-    } catch (e) {
-        console.error("⛔ Error calculating from tiers:", e);
-        return defaultBase + (Math.max(0, weightKg - 5) * defaultPerKg);
     }
 }
 
@@ -4197,19 +4344,16 @@ function orderToShipment(order, shop, shopData) {
             `${item.quantity}x ${item.name}`
         ).join(", "),
 
-        // Notas normales
-        specialInstructions: order.note || "",
-
         totalWeightKg,
         length,
         width,
         height,
-        volumetricWeight: (length * width * height) / 5000, // puedes ajustar divisor
+        volumetricWeight: (length * width * height) / 5000,
 
         // Servicio
         serviceType,
 
-        // Instrucciones
+        // Instrucciones / notas de la orden
         specialInstructions: order.note || "",
 
         // COD
@@ -4330,21 +4474,40 @@ function keepAlive() {
 }
 
 // ======================
+// HELPER: Ejecutar tarea periódica con protección contra solapamiento
+// ======================
+function scheduleTask(name, fn, intervalMs) {
+    let running = false;
+    setInterval(async () => {
+        if (running) {
+            console.log(`⏭️ [${name}] Tarea anterior aún en ejecución, saltando ciclo.`);
+            return;
+        }
+        running = true;
+        try {
+            await fn();
+        } catch (err) {
+            console.error(`⛔ [${name}] Error inesperado en tarea periódica:`, err.message);
+        } finally {
+            running = false;
+        }
+    }, intervalMs);
+    console.log(`🔄 [${name}] Iniciado (cada ${intervalMs / 1000}s).`);
+}
+
+// ======================
 // START SERVER
 // ======================
 app.listen(PORT, () => {
     console.log(`🚀 PATHXPRESS Shopify App running on port ${PORT}`);
     console.log(`📡 App URL: ${process.env.APP_URL || 'Not configured'}`);
 
-    // Iniciar Cron/Intervalo de Sincronización (cada 60 segundos)
-    setInterval(syncShipmentsToShopify, 60 * 1000);
+    // Sincronización de envíos con Shopify (cada 60s, sin solapamiento)
+    scheduleTask("SyncShipments", syncShipmentsToShopify, 60 * 1000);
 
-    // Iniciar Cron de Reintentos (cada 5 minutos)
-    setInterval(processRetryQueue, 5 * 60 * 1000);
+    // Cola de reintentos de webhooks fallidos (cada 5 minutos, sin solapamiento)
+    scheduleTask("RetryQueue", processRetryQueue, 5 * 60 * 1000);
 
-    console.log("🔄 Automatic synchronization started (every 60s).");
-    console.log("🛡️ Retry system started (every 5m).");
-
-    // Start keep-alive after server is running
+    // Keep-alive para Koyeb
     keepAlive();
 });
