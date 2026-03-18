@@ -1031,12 +1031,14 @@ app.post(
             console.log(`✅ Return waybill ${returnWaybill} created, DB id: ${returnOrderId}`);
 
             // Insert into shopify_shipments so return appears in the dashboard
+            // Use the return's own numeric ID (not the order ID) to avoid unique_order conflict
+            const returnNumericId = returnGid.split('/').pop();
             await db.execute(
                 `INSERT INTO shopify_shipments (shop_domain, shop_order_id, shop_order_name, consignee_name, consignee_phone, address_line1, city, country, total_weight_kg, cod_amount, currency, status, items_description)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     shop,
-                    shopifyOrderNumericId,
+                    returnNumericId,
                     returnOrderNumber,
                     consigneeName,
                     consigneePhone,
@@ -4006,7 +4008,14 @@ async function processRetryQueue() {
         console.log(`🛡️ Processing ${rows.length} retries...`);
 
         for (const row of rows) {
-            const { id, shop_domain, payload, retry_count } = row;
+            const { id, shop_domain, payload, retry_count, error_message } = row;
+
+            // Return webhooks cannot be retried as regular orders — skip them
+            if (error_message && error_message.startsWith('RETURN:')) {
+                console.warn(`⚠️ Retry ID ${id} is a return webhook, cannot auto-retry as order. Marking FAILED.`);
+                await db.execute("UPDATE webhook_retries SET status = 'FAILED', updated_at = NOW() WHERE id = ?", [id]);
+                continue;
+            }
 
             try {
                 // Parsear payload si viene como string
@@ -4601,6 +4610,18 @@ async function initializeDB() {
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
         `);
+
+        // Migrate shopify_shipments unique index from (shop_domain, shop_order_id)
+        // to (shop_domain, shop_order_name) so returns and exchanges can share the same order_id
+        try {
+            await db.execute("ALTER TABLE shopify_shipments DROP INDEX unique_order");
+            console.log("✅ Dropped old unique_order index on shopify_shipments.");
+        } catch (e) { /* already dropped or doesn't exist */ }
+        try {
+            await db.execute("ALTER TABLE shopify_shipments ADD UNIQUE INDEX unique_order_name (shop_domain, shop_order_name)");
+            console.log("✅ Added unique_order_name index on shopify_shipments.");
+        } catch (e) { /* already exists */ }
+
         console.log("✅ DB tables verified/created.");
     } catch (err) {
         console.error("❌ Error initializing DB tables:", err);
