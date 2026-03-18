@@ -821,8 +821,7 @@ app.post(
                             edges {
                                 node {
                                     id
-                                    quantity
-                                    lineItems {
+                                    lineItem {
                                         title
                                         quantity
                                         variant {
@@ -1066,9 +1065,8 @@ app.post(
             if (hasExchangeItems) {
                 const exchangeWaybill = await generateNextWaybillNumber();
                 const exchangeItems = returnObj.exchangeLineItems.edges.map(e => {
-                    // lineItems is an array of LineItem objects
-                    const items = e.node.lineItems || [];
-                    return items.map(li => `${li?.title || 'Unknown'} (x${li?.quantity || 1})`).join(', ');
+                    const li = e.node.lineItem;
+                    return li ? `${li.title || 'Unknown'} (x${li.quantity || 1})` : 'Unknown';
                 }).filter(Boolean);
 
                 // Default weight for exchange items (Shopify doesn't expose variant weight through ExchangeLineItem)
@@ -1087,14 +1085,14 @@ app.post(
                 let exchangeTotal = 0;
                 const outstandingCurrency = shopData.currency || "AED";
                 returnObj.exchangeLineItems.edges.forEach(e => {
-                    const items = e.node.lineItems || [];
-                    items.forEach(li => {
+                    const li = e.node.lineItem;
+                    if (li) {
                         // Use variant.price (real product price) — originalUnitPriceSet is 0
                         // because Shopify applies return credit to the exchange line item price
                         const rawPrice = li?.variant?.price;
                         const price = rawPrice !== undefined && rawPrice !== null ? parseFloat(rawPrice) : 0;
                         if (!isNaN(price)) exchangeTotal += price * (li.quantity || 1);
-                    });
+                    }
                 });
 
                 const diff = exchangeTotal - returnTotal;
@@ -4496,18 +4494,43 @@ function scheduleTask(name, fn, intervalMs) {
 }
 
 // ======================
+// DB INITIALIZATION
+// ======================
+async function initializeDB() {
+    try {
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS webhook_retries (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                shop_domain VARCHAR(255),
+                payload JSON,
+                error_message TEXT,
+                retry_count INT DEFAULT 0,
+                status ENUM('PENDING', 'PROCESSED', 'FAILED') DEFAULT 'PENDING',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        `);
+        console.log("✅ DB tables verified/created.");
+    } catch (err) {
+        console.error("❌ Error initializing DB tables:", err);
+    }
+}
+
+// ======================
 // START SERVER
 // ======================
-app.listen(PORT, () => {
-    console.log(`🚀 PATHXPRESS Shopify App running on port ${PORT}`);
-    console.log(`📡 App URL: ${process.env.APP_URL || 'Not configured'}`);
+initializeDB().then(() => {
+    app.listen(PORT, () => {
+        console.log(`🚀 PATHXPRESS Shopify App running on port ${PORT}`);
+        console.log(`📡 App URL: ${process.env.APP_URL || 'Not configured'}`);
 
-    // Sincronización de envíos con Shopify (cada 60s, sin solapamiento)
-    scheduleTask("SyncShipments", syncShipmentsToShopify, 60 * 1000);
+        // Sincronización de envíos con Shopify (cada 60s, sin solapamiento)
+        scheduleTask("SyncShipments", syncShipmentsToShopify, 60 * 1000);
 
-    // Cola de reintentos de webhooks fallidos (cada 5 minutos, sin solapamiento)
-    scheduleTask("RetryQueue", processRetryQueue, 5 * 60 * 1000);
+        // Cola de reintentos de webhooks fallidos (cada 5 minutos, sin solapamiento)
+        scheduleTask("RetryQueue", processRetryQueue, 5 * 60 * 1000);
 
-    // Keep-alive para Koyeb
-    keepAlive();
+        // Keep-alive para Koyeb
+        keepAlive();
+    });
 });
