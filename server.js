@@ -445,17 +445,22 @@ async function generateNextWaybillNumber() {
     const year = new Date().getFullYear();
     const prefix = `PX${year}`;
 
-    // INSERT atómico: incrementa el contador en DB y obtiene el nuevo valor
-    // Requiere tabla: CREATE TABLE IF NOT EXISTS waybill_sequences (prefix VARCHAR(10) PRIMARY KEY, last_seq INT NOT NULL DEFAULT 0)
     const conn = await db.getConnection();
     try {
         await conn.beginTransaction();
 
-        // Upsert: si no existe la fila del año, la crea; si existe, incrementa
+        // Self-heal: ensure sequence counter is at least as high as the max waybill already in orders
         await conn.execute(
             `INSERT INTO waybill_sequences (prefix, last_seq)
-             VALUES (?, 1)
-             ON DUPLICATE KEY UPDATE last_seq = last_seq + 1`,
+             SELECT ?, COALESCE(MAX(CAST(SUBSTRING(waybillNumber, ?) AS UNSIGNED)), 0)
+             FROM orders WHERE waybillNumber LIKE ?
+             ON DUPLICATE KEY UPDATE last_seq = GREATEST(last_seq, VALUES(last_seq))`,
+            [prefix, prefix.length + 1, `${prefix}%`]
+        );
+
+        // Now increment and get next value
+        await conn.execute(
+            `UPDATE waybill_sequences SET last_seq = last_seq + 1 WHERE prefix = ?`,
             [prefix]
         );
 
