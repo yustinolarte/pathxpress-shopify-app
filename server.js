@@ -449,12 +449,12 @@ async function generateNextWaybillNumber() {
     try {
         await conn.beginTransaction();
 
-        // Self-heal: ensure sequence counter is at least as high as the max waybill already in orders
+        // Self-heal: always sync counter to actual max waybill in DB (handles deletions too)
         await conn.execute(
             `INSERT INTO waybill_sequences (prefix, last_seq)
              SELECT ?, COALESCE(MAX(CAST(SUBSTRING(waybillNumber, ?) AS UNSIGNED)), 0)
              FROM orders WHERE waybillNumber LIKE ?
-             ON DUPLICATE KEY UPDATE last_seq = GREATEST(last_seq, VALUES(last_seq))`,
+             ON DUPLICATE KEY UPDATE last_seq = VALUES(last_seq)`,
             [prefix, prefix.length + 1, `${prefix}%`]
         );
 
@@ -652,6 +652,16 @@ app.post(
                 return res.sendStatus(200);
             }
 
+            // If this order already has an exchange waybill (created via returns/approve), don't create a second shipment
+            const [existingExchange] = await db.execute(
+                "SELECT id FROM orders WHERE orderNumber = ? LIMIT 1",
+                [`EXC-NEW-${order.name}`]
+            );
+            if (existingExchange.length > 0) {
+                console.log(`⚠️ Order ${order.name} already has exchange waybill EXC-NEW-${order.name}. Skipping duplicate shipment creation.`);
+                return res.sendStatus(200);
+            }
+
             // --- FILTRADO DE ÓRDENES ---
             if (shopData) {
                 const autoSync = shopData.auto_sync !== 0;
@@ -740,15 +750,20 @@ app.post(
             const shopData = await getShopFromDB(shop);
             const { isCOD, codAmount } = detectCOD(order);
 
+            console.log(`🔄 orders/updated for ${order.name} → exchange ${exchangeOrderNumber}: isCOD=${isCOD}, amount=${codAmount}, gateways=${JSON.stringify(order.payment_gateway_names)}, financial_status=${order.financial_status}`);
+
             const existing = rows[0];
-            // Only update if COD status changed
-            if (isCOD !== Boolean(existing.codRequired) || codAmount !== existing.codAmount) {
-                await db.execute(
-                    "UPDATE orders SET codRequired = ?, codAmount = ?, codCurrency = ? WHERE id = ?",
-                    [isCOD ? 1 : 0, codAmount, shopData.currency || "AED", existing.id]
-                );
-                console.log(`💰 Exchange COD updated for ${exchangeOrderNumber}: codRequired=${isCOD}, amount=${codAmount}`);
-            }
+            // Always update COD fields when exchange order is updated
+            await db.execute(
+                "UPDATE orders SET codRequired = ?, codAmount = ?, codCurrency = ? WHERE id = ?",
+                [isCOD ? 1 : 0, codAmount, shopData?.currency || order.currency || "AED", existing.id]
+            );
+            // Also update shopify_shipments so dashboard reflects it
+            await db.execute(
+                "UPDATE shopify_shipments SET cod_amount = ? WHERE shop_order_name = ?",
+                [codAmount, exchangeOrderNumber]
+            );
+            console.log(`💰 Exchange COD synced for ${exchangeOrderNumber}: codRequired=${isCOD}, amount=${codAmount}`);
         } catch (e) {
             console.error("⚠️ Error processing orders/updated webhook:", e.message);
         }
@@ -884,6 +899,8 @@ app.post(
 
             const returnObj = returnDetails.return;
             const shopifyOrder = returnObj.order;
+            // GraphQL returns GID (e.g. "gid://shopify/Order/123") — REST API needs numeric ID
+            const shopifyOrderNumericId = shopifyOrder.id.split('/').pop();
             const shippingAddr = shopifyOrder.shippingAddress || {};
 
             // Collect returned item descriptions
@@ -1019,7 +1036,7 @@ app.post(
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     shop,
-                    shopifyOrder.id,
+                    shopifyOrderNumericId,
                     returnOrderNumber,
                     consigneeName,
                     consigneePhone,
@@ -1117,7 +1134,7 @@ app.post(
                         console.log(`✅ Successfully injected waybill ${returnWaybill} into Shopify return ${returnObj.name}`);
                     }
                 } else {
-                    console.log(`⚠️ Could not find reverse delivery ID to inject tracking for Shopify return ${returnObj.name}`);
+                    console.warn(`⚠️ No reverseDelivery found for return ${returnObj.name} (${returnGid}). Raw response: ${JSON.stringify(deliveryRes?.return?.reverseFulfillmentOrders)}`);
                 }
             } catch (trackerErr) {
                 console.error(`⛔ Error injecting tracking into Shopify for return ${returnObj.name}:`, trackerErr.message);
@@ -1241,7 +1258,7 @@ app.post(
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         shop,
-                        shopifyOrder.id,
+                        shopifyOrderNumericId,
                         `EXC-NEW-${shopifyOrderName}`,
                         consigneeName,
                         consigneePhone,
