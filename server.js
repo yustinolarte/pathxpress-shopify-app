@@ -718,6 +718,43 @@ app.post(
 );
 
 
+// --- Orders Updated Webhook (exchange COD detection) ---
+app.post(
+    "/webhooks/shopify/orders-updated",
+    webhookMiddleware,
+    async (req, res) => {
+        const shop = req.headers["x-shopify-shop-domain"];
+        res.sendStatus(200); // Respond immediately
+
+        try {
+            const order = JSON.parse(req.body.toString("utf8"));
+
+            // Only care about orders that have an exchange waybill in our DB
+            const exchangeOrderNumber = `EXC-NEW-${order.name}`;
+            const [rows] = await db.execute(
+                "SELECT id, codRequired, codAmount FROM orders WHERE orderNumber = ? LIMIT 1",
+                [exchangeOrderNumber]
+            );
+            if (rows.length === 0) return; // Not an exchange order we track
+
+            const shopData = await getShopFromDB(shop);
+            const { isCOD, codAmount } = detectCOD(order);
+
+            const existing = rows[0];
+            // Only update if COD status changed
+            if (isCOD !== Boolean(existing.codRequired) || codAmount !== existing.codAmount) {
+                await db.execute(
+                    "UPDATE orders SET codRequired = ?, codAmount = ?, codCurrency = ? WHERE id = ?",
+                    [isCOD ? 1 : 0, codAmount, shopData.currency || "AED", existing.id]
+                );
+                console.log(`💰 Exchange COD updated for ${exchangeOrderNumber}: codRequired=${isCOD}, amount=${codAmount}`);
+            }
+        } catch (e) {
+            console.error("⚠️ Error processing orders/updated webhook:", e.message);
+        }
+    }
+);
+
 // --- Returns/Exchanges Webhook ---
 app.post(
     "/webhooks/shopify/returns",
@@ -976,6 +1013,27 @@ app.post(
             const returnOrderId = returnResult.insertId;
             console.log(`✅ Return waybill ${returnWaybill} created, DB id: ${returnOrderId}`);
 
+            // Insert into shopify_shipments so return appears in the dashboard
+            await db.execute(
+                `INSERT INTO shopify_shipments (shop_domain, shop_order_id, shop_order_name, consignee_name, consignee_phone, address_line1, city, country, total_weight_kg, cod_amount, currency, status, items_description)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    shop,
+                    shopifyOrder.id,
+                    returnOrderNumber,
+                    consigneeName,
+                    consigneePhone,
+                    consigneeAddress,
+                    consigneeCity,
+                    consigneeCountry,
+                    totalWeightKg,
+                    0,
+                    shopData.currency || "AED",
+                    "pending_pickup",
+                    returnedItems.join(", ") || null,
+                ]
+            );
+
             // Create tracking event for return
             await db.execute(
                 `INSERT INTO trackingEvents (shipmentId, eventDatetime, statusCode, statusLabel, description, createdBy, createdAt)
@@ -1176,6 +1234,27 @@ app.post(
 
                 const exchangeOrderId = exchangeResult.insertId;
                 console.log(`✅ Exchange shipment ${exchangeWaybill} created, DB id: ${exchangeOrderId}`);
+
+                // Insert into shopify_shipments so exchange appears in the dashboard
+                await db.execute(
+                    `INSERT INTO shopify_shipments (shop_domain, shop_order_id, shop_order_name, consignee_name, consignee_phone, address_line1, city, country, total_weight_kg, cod_amount, currency, status, items_description)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        shop,
+                        shopifyOrder.id,
+                        `EXC-NEW-${shopifyOrderName}`,
+                        consigneeName,
+                        consigneePhone,
+                        consigneeAddress,
+                        consigneeCity,
+                        consigneeCountry,
+                        exchangeWeightKg,
+                        exchangeCodAmount,
+                        outstandingCurrency,
+                        "pending_pickup",
+                        exchangeItems.join(", ") || null,
+                    ]
+                );
 
                 // Link return order to exchange order
                 await db.execute(
@@ -3502,34 +3581,29 @@ app.get("/shopify/orders-test", async (req, res) => {
 // 8) REGISTRO DEL WEBHOOK
 // ======================
 async function registerOrderWebhook(shop, accessToken) {
-    const webhookUrl = `${process.env.APP_URL}/webhooks/shopify/orders`;
+    const ordersUrl = `${process.env.APP_URL}/webhooks/shopify/orders`;
+    const ordersUpdatedUrl = `${process.env.APP_URL}/webhooks/shopify/orders-updated`;
 
-    console.log("📡 Registering webhook for shop:", shop);
-    console.log("📡 Webhook URL:", webhookUrl);
+    console.log("📡 Registering webhooks for shop:", shop);
 
-    const response = await fetch(
-        `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json`,
-        {
-            method: "POST",
-            headers: {
-                "X-Shopify-Access-Token": accessToken,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                webhook: {
-                    topic: "orders/create",
-                    address: webhookUrl,
-                    format: "json",
+    for (const [topic, address] of [["orders/create", ordersUrl], ["orders/updated", ordersUpdatedUrl]]) {
+        const response = await fetch(
+            `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json`,
+            {
+                method: "POST",
+                headers: {
+                    "X-Shopify-Access-Token": accessToken,
+                    "Content-Type": "application/json",
                 },
-            }),
+                body: JSON.stringify({ webhook: { topic, address, format: "json" } }),
+            }
+        );
+        const body = await response.text();
+        if (response.status === 422 && body.includes("taken")) {
+            console.log(`🔔 Webhook ${topic} already registered.`);
+        } else {
+            console.log(`🔔 Webhook ${topic} registration:`, response.status, body);
         }
-    );
-
-    const body = await response.text();
-    if (response.status === 422 && body.includes("taken")) {
-        console.log("🔔 Order Webhook already registered.");
-    } else {
-        console.log("🔔 Webhook Registration:", response.status, body);
     }
 }
 
@@ -4239,6 +4313,20 @@ async function updateFulfillmentEvent(row) {
 
 
 
+function detectCOD(order) {
+    const paymentGateways = order.payment_gateway_names || [];
+    const isCodGateway = paymentGateways.some(pg =>
+        /cash|cod|contrareembolso|contra entrega|دفع|istlam/i.test(pg)
+    );
+    const isFinancialPending =
+        order.financial_status === "pending" ||
+        order.financial_status === "authorized" ||
+        order.financial_status === "partially_paid";
+    const isCOD = isCodGateway || (isFinancialPending && (paymentGateways.length === 0 || paymentGateways.includes("manual")));
+    const codAmount = isCOD ? Number(order.total_price) || 0 : 0;
+    return { isCOD, codAmount };
+}
+
 function orderToShipment(order, shop, shopData) {
     const shipping = order.shipping_address || order.billing_address || {};
     const customer = order.customer || {};
@@ -4268,26 +4356,7 @@ function orderToShipment(order, shop, shopData) {
     const width = Number(process.env.DEFAULT_WIDTH) || 15;
     const height = Number(process.env.DEFAULT_HEIGHT) || 15;
 
-    // Detección de COD mejorada
-    const paymentGateways = order.payment_gateway_names || [];
-
-    // 1. Verificar si el método de pago incluye "Cash on Delivery" (o similar)
-    const isCodGateway = paymentGateways.some(pg =>
-        /cash|cod|contrareembolso|contra entrega|دفع|istlam/i.test(pg)
-    );
-
-    // 2. Verificar estado financiero (pending/authorized suele ser COD, paid es tarjeta)
-    const isFinancialPending =
-        order.financial_status === "pending" ||
-        order.financial_status === "authorized" ||
-        order.financial_status === "partially_paid";
-
-    // Regla final: Es COD si:
-    // a) El gateway lo dice explícitamente (palabras clave)
-    // b) Está pendiente de pago Y (no hay gateway definido O es manual) -> Típico de Draft Orders o pedidos manuales
-    const isCOD = isCodGateway || (isFinancialPending && (paymentGateways.length === 0 || paymentGateways.includes("manual")));
-
-    const codAmount = isCOD ? Number(order.total_price) || 0 : 0;
+    const { codAmount } = detectCOD(order);
 
     // Mapeo a clientId del portal
     // YA NO USAMOS MAPPING HARDCODED. Usamos lo que venga en shopData (DB)
