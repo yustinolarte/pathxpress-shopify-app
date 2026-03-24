@@ -275,8 +275,8 @@ async function saveShipmentToOrdersTable(shipment) {
                 new Date(), // lastStatusUpdate
 
                 // geolocalización / ventana horaria / prioridad / rutas
-                null, // latitude
-                null, // longitude
+                shipment.latitude || null, // latitude (del checkout de Shopify si el cliente usó Google Maps)
+                shipment.longitude || null, // longitude
                 null, // timeWindowStart
                 null, // timeWindowEnd
                 0,    // priorityLevel
@@ -408,6 +408,29 @@ async function getShopFromDB(shopDomain) {
         return rows[0] || null;
     } catch (err) {
         console.error("⛔ Error getting shop from DB:", err);
+        return null;
+    }
+}
+
+// ======================
+// HELPER: Obtener assigned_location de fulfillment_order (dirección de sucursal origen)
+// ======================
+async function getOrderAssignedLocation(shop, accessToken, orderId) {
+    try {
+        const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${orderId}/fulfillment_orders.json`;
+        const res = await fetch(url, {
+            headers: { "X-Shopify-Access-Token": accessToken }
+        });
+        const json = await res.json();
+        const fulfillmentOrders = json.fulfillment_orders || [];
+        const openFO = fulfillmentOrders.find(fo => fo.status === "open" || fo.status === "in_progress");
+        if (openFO && openFO.assigned_location) {
+            console.log(`📍 Assigned location for order ${orderId}:`, openFO.assigned_location.name);
+            return openFO.assigned_location;
+        }
+        return null;
+    } catch (err) {
+        console.error("⛔ Error fetching assigned_location:", err);
         return null;
     }
 }
@@ -696,7 +719,12 @@ app.post(
             }
             // ---------------------------
 
-            const shipment = orderToShipment(order, shop, shopData);
+            // Obtener dirección de la sucursal asignada al fulfillment
+            const assignedLocation = shopData?.access_token
+                ? await getOrderAssignedLocation(shop, shopData.access_token, order.id)
+                : null;
+
+            const shipment = orderToShipment(order, shop, shopData, assignedLocation);
 
             console.log("🚚 Shipment ready to save to MySQL:");
             console.dir(shipment, { depth: null });
@@ -4353,17 +4381,17 @@ function detectCOD(order) {
     return { isCOD, codAmount };
 }
 
-function orderToShipment(order, shop, shopData) {
+function orderToShipment(order, shop, shopData, assignedLocation = null) {
     const shipping = order.shipping_address || order.billing_address || {};
     const customer = order.customer || {};
 
-    // Datos del Shipper (Tienda)
-    // Si no hay datos en DB, usamos fallbacks
-    const shipperName = shopData?.shop_name || shop;
-    const shipperAddress = shopData?.address1 || "";
-    const shipperCity = shopData?.city || "Dubai";
-    const shipperCountry = shopData?.country || "UAE";
-    const shipperPhone = shopData?.phone || "";
+    // Datos del Shipper (Sucursal asignada o dirección general de la tienda)
+    // Si hay assigned_location (sucursal), usamos esa dirección. Si no, fallback a shopData.
+    const shipperName = assignedLocation?.name || shopData?.shop_name || shop;
+    const shipperAddress = assignedLocation?.address1 || shopData?.address1 || "";
+    const shipperCity = assignedLocation?.city || shopData?.city || "Dubai";
+    const shipperCountry = assignedLocation?.country_code || shopData?.country || "UAE";
+    const shipperPhone = assignedLocation?.phone || shopData?.phone || "";
 
     // Peso: Intentamos usar total_weight (en gramos), si no, sumamos items, si no, default 1kg
     let totalWeightKg = order.total_weight ? order.total_weight / 1000 : 0;
@@ -4458,6 +4486,10 @@ function orderToShipment(order, shop, shopData) {
         codRequired: codAmount > 0 ? 1 : 0,
         codAmount,
         codCurrency: order.currency || "AED",
+
+        // Coordenadas GPS (Shopify las incluye cuando el cliente usó Google Maps Autocomplete)
+        latitude: shipping.latitude ? String(shipping.latitude) : null,
+        longitude: shipping.longitude ? String(shipping.longitude) : null,
 
         // Fechas / estado
         pickupDate: order.created_at || new Date().toISOString(),
