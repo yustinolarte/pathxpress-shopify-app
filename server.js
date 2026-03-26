@@ -1612,6 +1612,10 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         ? `<button class="delete-btn" onclick="deleteOrder(${row.id}, '${row.shop_order_name}')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
                         : '';
 
+                    const editShipperBtn = row.status === 'PENDING_PICKUP'
+                        ? `<button class="edit-shipper-btn" onclick="openShipperModal(${row.id})" title="Change origin address" style="background:rgba(45,108,246,0.15);border:1px solid rgba(45,108,246,0.3);color:#2D6CF6;padding:6px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
+                        : '';
+
                     return `
                     <tr id="order-row-${row.id}" data-type="${typeKey}">
                         <td><strong style="color: var(--text-primary);">${row.shop_order_name}</strong></td>
@@ -1625,6 +1629,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             ? `<button class="print-btn" onclick='generateWaybillPDF(${shipmentData})'><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>Print Label</button>`
                             : '<span style="color: var(--text-muted);">Pending</span>'
                         }
+                            ${editShipperBtn}
                             ${deleteBtn}
                         </td>
                     </tr>
@@ -2877,6 +2882,100 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 }
             }
             
+            // ===== SHIPPER MODAL =====
+            let _shipperOrderId = null;
+            let _shopLocations = [];
+
+            async function openShipperModal(orderId) {
+                _shipperOrderId = orderId;
+                const modal = document.getElementById('shipper-modal');
+                const select = document.getElementById('location-select');
+                const loadingMsg = document.getElementById('location-loading');
+
+                modal.style.display = 'flex';
+
+                if (_shopLocations.length === 0) {
+                    loadingMsg.style.display = 'block';
+                    select.style.display = 'none';
+                    try {
+                        let token = null;
+                        if (window.shopify && window.shopify.idToken) token = await window.shopify.idToken();
+                        const headers = {};
+                        if (token) headers['Authorization'] = 'Bearer ' + token;
+                        const r = await fetch('/api/shop-locations?shop=${shop}', { headers });
+                        _shopLocations = await r.json();
+                        select.innerHTML = _shopLocations.map(l =>
+                            \`<option value="\${l.id}">\${l.name} — \${l.address1 || ''}, \${l.city || ''}</option>\`
+                        ).join('');
+                    } catch(e) {
+                        showToast('Error loading locations', 'error');
+                        closeShipperModal();
+                        return;
+                    } finally {
+                        loadingMsg.style.display = 'none';
+                        select.style.display = 'block';
+                    }
+                }
+
+                // Pre-fill fields with first location
+                onLocationSelect();
+            }
+
+            function onLocationSelect() {
+                const select = document.getElementById('location-select');
+                const loc = _shopLocations.find(l => String(l.id) === String(select.value));
+                if (!loc) return;
+                document.getElementById('shipper-name').value = loc.name || '';
+                document.getElementById('shipper-address').value = loc.address1 || '';
+                document.getElementById('shipper-city').value = loc.city || '';
+                document.getElementById('shipper-country').value = loc.country_code || loc.country || '';
+                document.getElementById('shipper-phone').value = loc.phone || '';
+            }
+
+            function closeShipperModal() {
+                document.getElementById('shipper-modal').style.display = 'none';
+                _shipperOrderId = null;
+            }
+
+            async function saveShipper() {
+                const saveBtn = document.getElementById('save-shipper-btn');
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving...';
+                try {
+                    let token = null;
+                    if (window.shopify && window.shopify.idToken) token = await window.shopify.idToken();
+                    const headers = { 'Content-Type': 'application/json' };
+                    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+                    const payload = {
+                        shipperName:    document.getElementById('shipper-name').value,
+                        shipperAddress: document.getElementById('shipper-address').value,
+                        shipperCity:    document.getElementById('shipper-city').value,
+                        shipperCountry: document.getElementById('shipper-country').value,
+                        shipperPhone:   document.getElementById('shipper-phone').value,
+                    };
+
+                    const r = await fetch('/api/orders/' + _shipperOrderId + '/shipper?shop=${shop}', {
+                        method: 'PUT',
+                        headers,
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (r.ok) {
+                        showToast('Origin address updated', 'success');
+                        closeShipperModal();
+                    } else {
+                        const err = await r.json().catch(() => ({}));
+                        showToast(err.error || 'Error updating address', 'error');
+                    }
+                } catch(e) {
+                    showToast('Network error', 'error');
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save';
+                }
+            }
+
             // Simple toast notification
             function showToast(message, type) {
                 const toast = document.createElement('div');
@@ -2903,6 +3002,49 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 }, 3000);
             }
 </script>
+
+      <!-- SHIPPER ADDRESS MODAL -->
+      <div id="shipper-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:2000;align-items:center;justify-content:center;">
+        <div style="background:var(--bg-card);border-radius:14px;padding:28px 24px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.07);">
+          <h3 style="margin:0 0 18px;color:var(--text-primary);font-size:16px;font-weight:600;">Change origin address</h3>
+
+          <span id="location-loading" style="display:none;color:var(--text-muted);font-size:14px;">Loading locations...</span>
+
+          <label style="display:block;margin-bottom:14px;">
+            <span style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:5px;">Shopify Location</span>
+            <select id="location-select" onchange="onLocationSelect()" style="width:100%;background:var(--bg-primary);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--text-primary);padding:9px 12px;font-size:14px;outline:none;"></select>
+          </label>
+
+          <label style="display:block;margin-bottom:10px;">
+            <span style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:5px;">Name</span>
+            <input id="shipper-name" type="text" style="width:100%;background:var(--bg-primary);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--text-primary);padding:9px 12px;font-size:14px;outline:none;box-sizing:border-box;" />
+          </label>
+          <label style="display:block;margin-bottom:10px;">
+            <span style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:5px;">Address</span>
+            <input id="shipper-address" type="text" style="width:100%;background:var(--bg-primary);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--text-primary);padding:9px 12px;font-size:14px;outline:none;box-sizing:border-box;" />
+          </label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <label style="display:block;">
+              <span style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:5px;">City</span>
+              <input id="shipper-city" type="text" style="width:100%;background:var(--bg-primary);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--text-primary);padding:9px 12px;font-size:14px;outline:none;box-sizing:border-box;" />
+            </label>
+            <label style="display:block;">
+              <span style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:5px;">Country</span>
+              <input id="shipper-country" type="text" style="width:100%;background:var(--bg-primary);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--text-primary);padding:9px 12px;font-size:14px;outline:none;box-sizing:border-box;" />
+            </label>
+          </div>
+          <label style="display:block;margin-bottom:20px;">
+            <span style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:5px;">Phone</span>
+            <input id="shipper-phone" type="text" style="width:100%;background:var(--bg-primary);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:var(--text-primary);padding:9px 12px;font-size:14px;outline:none;box-sizing:border-box;" />
+          </label>
+
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button onclick="closeShipperModal()" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.1);color:var(--text-primary);padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;">Cancel</button>
+            <button id="save-shipper-btn" onclick="saveShipper()" style="background:var(--blue-electric);border:none;color:#fff;padding:9px 18px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;">Save</button>
+          </div>
+        </div>
+      </div>
+
       </body >
     </html >
     `);
@@ -3056,6 +3198,65 @@ app.delete("/api/orders/:orderId", requireSessionToken, async (req, res) => {
     } catch (err) {
         console.error("⛔ Error deleting order:", err);
         res.status(500).json({ success: false, error: "Internal server error" });
+    }
+});
+
+// ======================
+// 4.1.4.1) GET SHOP LOCATIONS
+// ======================
+app.get("/api/shop-locations", requireSessionToken, async (req, res) => {
+    const session = req.shopifySession;
+    let shop = session ? session.shop : req.query.shop;
+    if (!shop) return res.status(401).json({ error: "Unauthorized" });
+
+    try {
+        const shopData = await getShopFromDB(shop);
+        if (!shopData?.access_token) return res.status(401).json({ error: "Shop not found" });
+
+        const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/locations.json`;
+        const r = await fetch(url, { headers: { "X-Shopify-Access-Token": shopData.access_token } });
+        const json = await r.json();
+        res.json(json.locations || []);
+    } catch (err) {
+        console.error("⛔ Error fetching shop locations:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// ======================
+// 4.1.4.2) UPDATE SHIPPER ADDRESS (pending_pickup only)
+// ======================
+app.put("/api/orders/:orderId/shipper", requireSessionToken, async (req, res) => {
+    const { orderId } = req.params;
+    const session = req.shopifySession;
+    let shop = session ? session.shop : req.query.shop;
+    if (!shop) return res.status(401).json({ error: "Unauthorized" });
+
+    const { shipperName, shipperAddress, shipperCity, shipperCountry, shipperPhone } = req.body;
+
+    try {
+        // Verify the order belongs to this shop and is pending_pickup
+        const [rows] = await db.execute(
+            `SELECT o.id FROM orders o
+             JOIN shopify_shipments ss ON ss.shop_order_name = o.orderNumber
+             WHERE o.id = ? AND ss.shop_domain = ? AND o.status = 'PENDING_PICKUP'`,
+            [orderId, shop]
+        );
+
+        if (rows.length === 0) {
+            return res.status(403).json({ error: "Order not found or not editable" });
+        }
+
+        await db.execute(
+            `UPDATE orders SET shipperName=?, shipperAddress=?, shipperCity=?, shipperCountry=?, shipperPhone=?, updatedAt=NOW() WHERE id=?`,
+            [shipperName, shipperAddress, shipperCity, shipperCountry, shipperPhone, orderId]
+        );
+
+        console.log(`✏️ Shipper address updated for order ID ${orderId} by shop ${shop}`);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error("⛔ Error updating shipper address:", err);
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
