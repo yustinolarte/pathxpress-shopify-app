@@ -3822,7 +3822,7 @@ app.get("/shopify/orders-test", async (req, res) => {
             rowsHtml += `
             <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}">
                 <td class="cb-col">
-                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-name="${escHtml(order.name)}" onchange="updateSyncButton()">`}
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-name="${escHtml(order.name)}" onclick="updateSyncButton()">`}
                 </td>
                 <td><strong>${escHtml(order.name)}</strong></td>
                 <td>${escHtml(customerName)}</td>
@@ -4064,7 +4064,7 @@ app.get("/shopify/orders-test", async (req, res) => {
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString();
             return '<tr data-order-id="' + esc(order.id) + '" data-order-name="' + esc(order.name) + '">' +
-                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + esc(order.id) + '" data-name="' + esc(order.name) + '" onchange="updateSyncButton()"></td>' +
+                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + esc(order.id) + '" data-name="' + esc(order.name) + '" onclick="updateSyncButton()"></td>' +
                 '<td><strong>' + esc(order.name) + '</strong></td>' +
                 '<td>' + esc(order.customerName) + '</td>' +
                 '<td>' + esc(order.total_price) + ' ' + esc(order.currency) + '</td>' +
