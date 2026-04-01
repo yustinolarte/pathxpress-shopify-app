@@ -3816,7 +3816,7 @@ app.get("/shopify/orders-test", async (req, res) => {
             rowsHtml += `
             <tr data-order-id="${order.id}" data-order-name="${order.name}">
                 <td class="cb-col">
-                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}" onchange="onCbChange(this)">`}
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}">`}
                 </td>
                 <td><strong>${order.name}</strong></td>
                 <td>${customerName}</td>
@@ -3946,25 +3946,39 @@ app.get("/shopify/orders-test", async (req, res) => {
         }
 
         function updateSyncButton() {
-            const checked = getChecked();
-            const btn = document.getElementById("syncBtn");
+            var checked = getChecked();
+            var btn = document.getElementById("syncBtn");
+            if (!btn) return;
             btn.textContent = "Sync Selected (" + checked.length + ")";
             btn.disabled = checked.length === 0;
-        }
-
-        function onCbChange(cb) {
-            cb.closest("tr").classList.toggle("selected", cb.checked);
-            document.getElementById("selectAll").checked = false;
-            updateSyncButton();
         }
 
         function toggleAll(cb) {
             document.querySelectorAll(".order-cb").forEach(function(c) {
                 c.checked = cb.checked;
-                c.closest("tr").classList.toggle("selected", cb.checked);
+                var row = c.closest("tr");
+                if (row) row.classList.toggle("selected", cb.checked);
             });
             updateSyncButton();
         }
+
+        // Event delegation — captura cambios en CUALQUIER checkbox .order-cb
+        // incluyendo los que se agregan dinámicamente (Find Unsynced)
+        document.addEventListener("change", function(e) {
+            var t = e.target;
+            if (!t) return;
+            if (t.id === "selectAll") {
+                toggleAll(t);
+                return;
+            }
+            if (t.classList && t.classList.contains("order-cb")) {
+                var row = t.closest("tr");
+                if (row) row.classList.toggle("selected", t.checked);
+                var sa = document.getElementById("selectAll");
+                if (sa) sa.checked = false;
+                updateSyncButton();
+            }
+        });
 
         async function syncSelected() {
             const checked = getChecked();
@@ -4035,7 +4049,7 @@ app.get("/shopify/orders-test", async (req, res) => {
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString();
             return '<tr data-order-id="' + order.id + '" data-order-name="' + order.name + '">' +
-                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '" onchange="onCbChange(this)"></td>' +
+                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '"></td>' +
                 '<td><strong>' + order.name + '</strong></td>' +
                 '<td>' + order.customerName + '</td>' +
                 '<td>' + order.total_price + ' ' + order.currency + '</td>' +
