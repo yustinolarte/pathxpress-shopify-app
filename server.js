@@ -735,6 +735,9 @@ app.post(
             // 2) insertar en tabla principal orders
             await saveShipmentToOrdersTable(shipment);
 
+            // 3) enviar al portal PathXpress
+            await sendShipmentToPathxpress(shipment);
+
         } catch (e) {
             console.log("⚠️ Error processing webhook order:", e);
 
