@@ -3765,8 +3765,10 @@ app.get("/shopify/orders-test", async (req, res) => {
     const pageInfo = req.query.page_info || null;
 
     try {
-        let url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=${limit}&status=any`;
-        if (pageInfo) url += `&page_info=${encodeURIComponent(pageInfo)}`;
+        // Shopify no permite &status cuando &page_info está presente
+        let url = pageInfo
+            ? `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=${limit}&page_info=${encodeURIComponent(pageInfo)}`
+            : `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=${limit}&status=any`;
 
         const response = await fetch(url, {
             headers: { "X-Shopify-Access-Token": shopData.access_token }
@@ -3814,7 +3816,7 @@ app.get("/shopify/orders-test", async (req, res) => {
             rowsHtml += `
             <tr data-order-id="${order.id}" data-order-name="${order.name}">
                 <td class="cb-col">
-                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}">`}
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}" onchange="onCbChange(this)">`}
                 </td>
                 <td><strong>${order.name}</strong></td>
                 <td>${customerName}</td>
@@ -3950,21 +3952,19 @@ app.get("/shopify/orders-test", async (req, res) => {
             btn.disabled = checked.length === 0;
         }
 
+        function onCbChange(cb) {
+            cb.closest("tr").classList.toggle("selected", cb.checked);
+            document.getElementById("selectAll").checked = false;
+            updateSyncButton();
+        }
+
         function toggleAll(cb) {
-            document.querySelectorAll(".order-cb").forEach(c => {
+            document.querySelectorAll(".order-cb").forEach(function(c) {
                 c.checked = cb.checked;
                 c.closest("tr").classList.toggle("selected", cb.checked);
             });
             updateSyncButton();
         }
-
-        document.querySelectorAll(".order-cb").forEach(cb => {
-            cb.addEventListener("change", function() {
-                this.closest("tr").classList.toggle("selected", this.checked);
-                updateSyncButton();
-                document.getElementById("selectAll").checked = false;
-            });
-        });
 
         async function syncSelected() {
             const checked = getChecked();
@@ -4035,7 +4035,7 @@ app.get("/shopify/orders-test", async (req, res) => {
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString();
             return '<tr data-order-id="' + order.id + '" data-order-name="' + order.name + '">' +
-                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '"></td>' +
+                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '" onchange="onCbChange(this)"></td>' +
                 '<td><strong>' + order.name + '</strong></td>' +
                 '<td>' + order.customerName + '</td>' +
                 '<td>' + order.total_price + ' ' + order.currency + '</td>' +
@@ -4072,15 +4072,6 @@ app.get("/shopify/orders-test", async (req, res) => {
                 } else {
                     orders.forEach(order => {
                         unsyncedBody.insertAdjacentHTML("beforeend", renderUnsyncedRow(order));
-                    });
-
-                    // Attach change listeners to new checkboxes
-                    unsyncedBody.querySelectorAll(".order-cb").forEach(cb => {
-                        cb.addEventListener("change", function() {
-                            this.closest("tr").classList.toggle("selected", this.checked);
-                            updateSyncButton();
-                            document.getElementById("selectAll").checked = false;
-                        });
                     });
 
                     const total = unsyncedBody.querySelectorAll(".order-cb").length;
