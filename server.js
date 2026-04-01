@@ -150,7 +150,11 @@ async function saveShipmentToMySQL(shipment) {
         currency,
         status,
         items_description
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        status = VALUES(status),
+        items_description = VALUES(items_description),
+        updated_at = CURRENT_TIMESTAMP`,
             [
                 shipment.shopDomain,
                 shipment.shopOrderId,
