@@ -5206,76 +5206,61 @@ function orderToShipment(order, shop, shopData, assignedLocation = null) {
 
 
 async function sendShipmentToPathxpress(shipment) {
-    // 1) Construimos el objeto input EXACTO que espera tRPC
-    const input = {
+    const PORTAL_URL = process.env.PATHXPRESS_PORTAL_URL || "https://pathxpress.net";
+    const INTEGRATION_SECRET = process.env.SHOPIFY_INTEGRATION_SECRET;
+
+    if (!INTEGRATION_SECRET) {
+        console.warn("⚠️ SHOPIFY_INTEGRATION_SECRET not set — skipping portal API call");
+        return null;
+    }
+
+    const body = {
+        clientId: shipment.clientId,
         shipment: {
-            // --- SHIPPER (remitente) ---
-            shipperName: shipment.shopDomain || "PATHXPRESS SHOPIFY",
+            shipperName: shipment.shipperName || shipment.shopDomain || "PATHXPRESS SHOPIFY",
             shipperAddress: shipment.shipperAddress || "",
             shipperCity: shipment.shipperCity || "",
             shipperCountry: shipment.shipperCountry || "UAE",
             shipperPhone: shipment.shipperPhone || "",
-
-            // --- CUSTOMER / CONSIGNEE ---
             customerName: shipment.consigneeName || "",
             customerPhone: shipment.consigneePhone || "",
             address: shipment.addressLine1 || "",
             city: shipment.city || "",
-            emirate: shipment.province || "",
+            emirate: shipment.emirate || "",
+            postalCode: shipment.postalCode || "",
             destinationCountry: shipment.country || "UAE",
-
-            // --- PIEZAS / PESO / DIMENSIONES ---
-            pieces: shipment.items?.length || 1,
+            pieces: shipment.pieces || 1,
             weight: shipment.totalWeightKg || 1,
             length: shipment.length || 15,
             width: shipment.width || 15,
             height: shipment.height || 15,
-
-            // --- SERVICIO ---
             serviceType: shipment.serviceType || "DOM",
-
-            // --- INSTRUCCIONES ---
             specialInstructions: shipment.specialInstructions || "",
-
-            // --- COD ---
             codRequired: shipment.codAmount > 0 ? 1 : 0,
-            codAmount: shipment.codAmount || "",
-            codCurrency: shipment.currency || "AED",
+            codAmount: shipment.codAmount ? String(shipment.codAmount) : null,
+            codCurrency: shipment.codCurrency || "AED",
+            latitude: shipment.latitude || null,
+            longitude: shipment.longitude || null,
         },
     };
 
-    // 2) tRPC batch body: [ { json: { input: { ... } } } ]
-    const body = [
-        {
-            json: {
-                input,
-            },
-        },
-    ];
-
-    console.log("📤 Enviando a portal.customer.createShipment INPUT:");
-    console.dir(input, { depth: null });
+    console.log("📤 Enviando a /api/shopify/create-shipment:", JSON.stringify(body, null, 2));
 
     try {
-        const response = await fetch(
-            "https://pathxpress.net/api/trpc/portal.customer.createShipment?batch=1",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Cookie": `pathxpress_portal_token=${process.env.PATHXPRESS_PORTAL_TOKEN}`,
-                },
-                body: JSON.stringify(body),
-            }
-        );
+        const response = await fetch(`${PORTAL_URL}/api/shopify/create-shipment`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${INTEGRATION_SECRET}`,
+            },
+            body: JSON.stringify(body),
+        });
 
         const json = await response.json();
-        // tRPC batch response: [{ result: { data: { waybillNumber: "PX202600001-K7X", ... } } }]
-        const portalWaybill = json?.[0]?.result?.data?.waybillNumber;
 
-        if (portalWaybill) {
-            console.log("✅ Portal asignó waybill:", portalWaybill);
-            return portalWaybill;
+        if (response.ok && json.waybillNumber) {
+            console.log("✅ Portal asignó waybill:", json.waybillNumber);
+            return json.waybillNumber;
         }
 
         console.warn("⚠️ Portal no retornó waybill. Respuesta:", response.status, JSON.stringify(json));
