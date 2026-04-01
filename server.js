@@ -468,6 +468,15 @@ async function shopifyGraphQL(shop, accessToken, query, variables = {}) {
 // HELPER: Generar Waybill Number de forma atómica (sin race conditions)
 // Usa la tabla waybill_sequences para generar secuencias únicas con AUTO_INCREMENT
 // ======================
+function generateWaybillSuffix() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let result = '';
+    for (let i = 0; i < 3; i++) {
+        result += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return result;
+}
+
 async function generateNextWaybillNumber() {
     const year = new Date().getFullYear();
     const prefix = `PX${year}`;
@@ -500,7 +509,7 @@ async function generateNextWaybillNumber() {
 
         const seq = row.last_seq;
         const sequenceStr = seq.toString().padStart(5, '0');
-        return `${prefix}${sequenceStr}`;
+        return `${prefix}${sequenceStr}-${generateWaybillSuffix()}`;
     } catch (err) {
         await conn.rollback();
         throw err;
