@@ -5188,7 +5188,6 @@ function orderToShipment(order, shop, shopData, assignedLocation = null) {
 async function sendShipmentToPathxpress(shipment) {
     // 1) Construimos el objeto input EXACTO que espera tRPC
     const input = {
-        token: process.env.PATHXPRESS_PORTAL_TOKEN,
         shipment: {
             // --- SHIPPER (remitente) ---
             shipperName: shipment.shopDomain || "PATHXPRESS SHOPIFY",
@@ -5244,6 +5243,7 @@ async function sendShipmentToPathxpress(shipment) {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
+                    "Cookie": `pathxpress_portal_token=${process.env.PATHXPRESS_PORTAL_TOKEN}`,
                 },
                 body: JSON.stringify(body),
             }
