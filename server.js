@@ -475,7 +475,7 @@ async function generateNextWaybillNumber() {
         // Self-heal: always sync counter to actual max waybill in DB (handles deletions too)
         await conn.execute(
             `INSERT INTO waybill_sequences (prefix, last_seq)
-             SELECT ?, COALESCE(MAX(CAST(SUBSTRING(waybillNumber, ?) AS UNSIGNED)), 0)
+             SELECT ?, COALESCE(MAX(CAST(SUBSTRING_INDEX(SUBSTRING(waybillNumber, ?), '-', 1) AS UNSIGNED)), 0)
              FROM orders WHERE waybillNumber LIKE ?
              ON DUPLICATE KEY UPDATE last_seq = VALUES(last_seq)`,
             [prefix, prefix.length + 1, `${prefix}%`]
