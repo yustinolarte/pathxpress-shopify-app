@@ -3822,7 +3822,7 @@ app.get("/shopify/orders-test", async (req, res) => {
             rowsHtml += `
             <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}">
                 <td class="cb-col">
-                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-name="${escHtml(order.name)}" onchange="updateSyncButton()">`}
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" onchange="cbChanged(this)">`}
                 </td>
                 <td><strong>${escHtml(order.name)}</strong></td>
                 <td>${escHtml(customerName)}</td>
@@ -3945,179 +3945,160 @@ app.get("/shopify/orders-test", async (req, res) => {
         </div>
     </div>
     <script>
-        const SHOP = ${JSON.stringify(shop)};
-
-        function esc(s) {
-            return String(s == null ? "" : s)
-                .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-        }
+        var SHOP = ${JSON.stringify(shop)};
 
         function getChecked() {
-            return Array.from(document.querySelectorAll(".order-cb")).filter(function(c) { return c.checked; });
+            var all = document.querySelectorAll(".order-cb");
+            var result = [];
+            for (var i = 0; i < all.length; i++) {
+                if (all[i].checked) result.push(all[i]);
+            }
+            return result;
         }
 
         function updateSyncButton() {
             var checked = getChecked();
-            var btn = document.getElementById("syncBtn");
-            if (!btn) return;
-            btn.textContent = "Sync Selected (" + checked.length + ")";
-            btn.disabled = checked.length === 0;
+            var syncBtn = document.getElementById("syncBtn");
+            if (!syncBtn) return;
+            syncBtn.textContent = "Sync Selected (" + checked.length + ")";
+            syncBtn.disabled = (checked.length === 0);
         }
 
         function toggleAll(cb) {
-            document.querySelectorAll(".order-cb").forEach(function(c) {
-                c.checked = cb.checked;
-                var row = c.closest("tr");
+            var all = document.querySelectorAll(".order-cb");
+            for (var i = 0; i < all.length; i++) {
+                all[i].checked = cb.checked;
+                var row = all[i].closest("tr");
                 if (row) row.classList.toggle("selected", cb.checked);
-            });
+            }
             updateSyncButton();
         }
 
-        // Event delegation para checkboxes .order-cb individuales
-        // Usa "click" porque dispara DESPUÉS de que .checked se actualiza en todos los browsers modernos
-        document.addEventListener("click", function(e) {
-            var t = e.target;
-            if (!t || !t.classList || !t.classList.contains("order-cb")) return;
-            var row = t.closest("tr");
-            if (row) row.classList.toggle("selected", t.checked);
+        function cbChanged(checkbox) {
+            var row = checkbox.closest("tr");
+            if (row) row.classList.toggle("selected", checkbox.checked);
             var sa = document.getElementById("selectAll");
-            if (sa && !t.checked) sa.checked = false;
+            if (sa && !checkbox.checked) sa.checked = false;
             updateSyncButton();
-        });
+        }
 
-        async function syncSelected() {
-            const checked = getChecked();
+        function syncSelected() {
+            var checked = getChecked();
             if (checked.length === 0) return;
 
-            const orderIds = checked.map(c => c.value);
-            const btn = document.getElementById("syncBtn");
-            btn.disabled = true;
-            btn.textContent = "Syncing...";
+            var orderIds = [];
+            for (var i = 0; i < checked.length; i++) {
+                orderIds.push(checked[i].value);
+            }
 
-            const progressBar = document.getElementById("progressBar");
-            const progressFill = document.getElementById("progressFill");
+            var syncBtn = document.getElementById("syncBtn");
+            syncBtn.disabled = true;
+            syncBtn.textContent = "Syncing...";
+
+            var progressBar = document.getElementById("progressBar");
+            var progressFill = document.getElementById("progressFill");
             progressBar.style.display = "block";
             progressFill.style.width = "10%";
 
-            // Set all selected rows to syncing state
-            checked.forEach(c => {
-                const resultCell = document.getElementById("result-" + c.value);
-                if (resultCell) resultCell.innerHTML = '<span class="badge syncing">Syncing…</span>';
-            });
+            for (var i = 0; i < checked.length; i++) {
+                var cell = document.getElementById("result-" + checked[i].value);
+                if (cell) cell.innerHTML = '<span class="badge syncing">Syncing...</span>';
+            }
 
-            try {
-                const resp = await fetch("/shopify/manual-sync", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ shop: SHOP, orderIds })
-                });
-
-                progressFill.style.width = "80%";
-                const data = await resp.json();
-
-                (data.results || []).forEach(r => {
-                    const resultCell = document.getElementById("result-" + r.orderId);
-                    if (!resultCell) return;
+            fetch("/shopify/manual-sync", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ shop: SHOP, orderIds: orderIds })
+            })
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                progressFill.style.width = "100%";
+                var results = data.results || [];
+                for (var i = 0; i < results.length; i++) {
+                    var r = results[i];
+                    var resultCell = document.getElementById("result-" + r.orderId);
+                    if (!resultCell) continue;
                     if (r.success) {
-                        resultCell.innerHTML = '<span class="badge synced">✓ ' + esc(r.waybill || "Synced") + '</span>';
-                        // Update waybill column
-                        const row = resultCell.closest("tr");
-                        const waybillCell = row.querySelector("td:nth-child(6)");
-                        if (waybillCell && r.waybill) waybillCell.innerHTML = '<span class="badge synced">✓ ' + esc(r.waybill) + '</span>';
-                        // Remove checkbox
-                        const cbCell = row.querySelector(".cb-col");
+                        resultCell.innerHTML = '<span class="badge synced">&#10003; ' + (r.waybill || "Synced") + '</span>';
+                        var tr = resultCell.closest("tr");
+                        var wCell = tr ? tr.querySelector("td:nth-child(6)") : null;
+                        if (wCell && r.waybill) wCell.innerHTML = '<span class="badge synced">&#10003; ' + r.waybill + '</span>';
+                        var cbCell = tr ? tr.querySelector(".cb-col") : null;
                         if (cbCell) cbCell.innerHTML = "";
                     } else if (r.skipped) {
                         resultCell.innerHTML = '<span class="badge synced">Already synced</span>';
                     } else {
-                        resultCell.innerHTML = '<span class="badge error" title="' + esc(r.error || "Error") + '">✗ Failed</span>';
+                        resultCell.innerHTML = '<span class="badge error">Failed</span>';
                     }
-                });
-
-                progressFill.style.width = "100%";
-                setTimeout(() => { progressBar.style.display = "none"; progressFill.style.width = "0%"; }, 800);
-
-                btn.textContent = "Sync Selected (0)";
-                btn.disabled = true;
+                }
+                setTimeout(function() { progressBar.style.display = "none"; progressFill.style.width = "0%"; }, 800);
+                syncBtn.textContent = "Sync Selected (0)";
+                syncBtn.disabled = true;
                 document.getElementById("selectAll").checked = false;
-
-            } catch (err) {
-                // Reset badges for orders that were not confirmed synced
-                checked.forEach(c => {
-                    const resultCell = document.getElementById("result-" + c.value);
-                    if (resultCell && resultCell.querySelector(".syncing")) {
-                        resultCell.innerHTML = "";
-                    }
-                });
+            })
+            .catch(function(err) {
                 progressBar.style.display = "none";
-                btn.disabled = false;
+                syncBtn.disabled = false;
                 updateSyncButton();
-                alert("Network error: " + err.message);
-            }
+                alert("Error: " + err.message);
+            });
         }
-
-        // ---- Find All Unsynced Orders ----
 
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString();
-            return '<tr data-order-id="' + esc(order.id) + '" data-order-name="' + esc(order.name) + '">' +
-                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + esc(order.id) + '" data-name="' + esc(order.name) + '" onchange="updateSyncButton()"></td>' +
-                '<td><strong>' + esc(order.name) + '</strong></td>' +
-                '<td>' + esc(order.customerName) + '</td>' +
-                '<td>' + esc(order.total_price) + ' ' + esc(order.currency) + '</td>' +
-                '<td>' + date + '</td>' +
-                '<td><span class="badge pending">Pending</span></td>' +
-                '<td class="result-col" id="result-' + esc(order.id) + '"></td>' +
-                '</tr>';
+            return '<tr data-order-id="' + order.id + '">'
+                + '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" onchange="cbChanged(this)"></td>'
+                + '<td><strong>' + order.name + '</strong></td>'
+                + '<td>' + (order.customerName || "") + '</td>'
+                + '<td>' + order.total_price + ' ' + order.currency + '</td>'
+                + '<td>' + date + '</td>'
+                + '<td><span class="badge pending">Pending</span></td>'
+                + '<td class="result-col" id="result-' + order.id + '"></td>'
+                + '</tr>';
         }
 
-        async function findUnsynced(pageInfo) {
-            const btn = document.getElementById("findUnsyncedBtn");
-            const scanStatus = document.getElementById("scanStatus");
-            const unsyncedSection = document.getElementById("unsyncedSection");
-            const unsyncedBody = document.getElementById("unsyncedBody");
-            const paginationDiv = document.getElementById("unsyncedPagination");
+        function findUnsynced(pageInfo) {
+            var findBtn = document.getElementById("findUnsyncedBtn");
+            var scanStatus = document.getElementById("scanStatus");
+            var unsyncedSection = document.getElementById("unsyncedSection");
+            var unsyncedBody = document.getElementById("unsyncedBody");
+            var paginationDiv = document.getElementById("unsyncedPagination");
 
-            btn.disabled = true;
-            scanStatus.textContent = "Scanning Shopify orders…";
+            findBtn.disabled = true;
+            scanStatus.textContent = "Scanning Shopify orders...";
 
-            let url = "/shopify/unsynced-orders?shop=" + encodeURIComponent(SHOP);
+            var url = "/shopify/unsynced-orders?shop=" + encodeURIComponent(SHOP);
             if (pageInfo) url += "&page_info=" + encodeURIComponent(pageInfo);
 
-            try {
-                const resp = await fetch(url);
+            fetch(url)
+            .then(function(resp) {
                 if (!resp.ok) throw new Error("Server error " + resp.status);
-                const data = await resp.json();
-
-                const orders = data.orders || [];
-
+                return resp.json();
+            })
+            .then(function(data) {
+                var orders = data.orders || [];
                 if (!pageInfo) unsyncedBody.innerHTML = "";
-
                 if (orders.length === 0 && !pageInfo) {
                     scanStatus.textContent = "All orders are already synced!";
                 } else {
-                    orders.forEach(order => {
-                        unsyncedBody.insertAdjacentHTML("beforeend", renderUnsyncedRow(order));
-                    });
-
-                    const total = unsyncedBody.querySelectorAll(".order-cb").length;
+                    for (var i = 0; i < orders.length; i++) {
+                        unsyncedBody.insertAdjacentHTML("beforeend", renderUnsyncedRow(orders[i]));
+                    }
+                    var total = unsyncedBody.querySelectorAll(".order-cb").length;
                     scanStatus.textContent = "Found " + total + " unsynced order" + (total !== 1 ? "s" : "") + (data.hasMore ? " (more available)" : "");
                     unsyncedSection.style.display = "block";
                 }
-
                 paginationDiv.innerHTML = "";
                 if (data.hasMore && data.nextPageInfo) {
-                    const cursor = data.nextPageInfo;
-                    paginationDiv.innerHTML = "<button class=\"btn-find\" onclick=\"findUnsynced('" + encodeURIComponent(cursor) + "')\">Load More →</button>";
+                    paginationDiv.innerHTML = '<button class="btn-find" onclick="findUnsynced(\'' + encodeURIComponent(data.nextPageInfo) + '\')">Load More</button>';
                 }
-
                 updateSyncButton();
-            } catch (err) {
-                scanStatus.textContent = "Error during scan: " + err.message;
-            } finally {
-                btn.disabled = false;
-            }
+                findBtn.disabled = false;
+            })
+            .catch(function(err) {
+                scanStatus.textContent = "Error: " + err.message;
+                findBtn.disabled = false;
+            });
         }
     </script>
 </body>
