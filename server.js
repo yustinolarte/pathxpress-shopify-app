@@ -3822,7 +3822,7 @@ app.get("/shopify/orders-test", async (req, res) => {
             rowsHtml += `
             <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}">
                 <td class="cb-col">
-                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-name="${escHtml(order.name)}" onclick="updateSyncButton()">`}
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-name="${escHtml(order.name)}">`}
                 </td>
                 <td><strong>${escHtml(order.name)}</strong></td>
                 <td>${escHtml(customerName)}</td>
@@ -3974,18 +3974,16 @@ app.get("/shopify/orders-test", async (req, res) => {
             updateSyncButton();
         }
 
-        // Event delegation — solo para checkboxes .order-cb individuales
-        // selectAll ya está manejado por onchange="toggleAll(this)" en el HTML
-        document.addEventListener("change", function(e) {
+        // Event delegation para checkboxes .order-cb individuales
+        // Usa "click" porque dispara DESPUÉS de que .checked se actualiza en todos los browsers modernos
+        document.addEventListener("click", function(e) {
             var t = e.target;
-            if (!t || t.id === "selectAll") return;
-            if (t.classList && t.classList.contains("order-cb")) {
-                var row = t.closest("tr");
-                if (row) row.classList.toggle("selected", t.checked);
-                var sa = document.getElementById("selectAll");
-                if (sa && !t.checked) sa.checked = false;
-                updateSyncButton();
-            }
+            if (!t || !t.classList || !t.classList.contains("order-cb")) return;
+            var row = t.closest("tr");
+            if (row) row.classList.toggle("selected", t.checked);
+            var sa = document.getElementById("selectAll");
+            if (sa && !t.checked) sa.checked = false;
+            updateSyncButton();
         });
 
         async function syncSelected() {
@@ -4064,7 +4062,7 @@ app.get("/shopify/orders-test", async (req, res) => {
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString();
             return '<tr data-order-id="' + esc(order.id) + '" data-order-name="' + esc(order.name) + '">' +
-                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + esc(order.id) + '" data-name="' + esc(order.name) + '" onclick="updateSyncButton()"></td>' +
+                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + esc(order.id) + '" data-name="' + esc(order.name) + '"></td>' +
                 '<td><strong>' + esc(order.name) + '</strong></td>' +
                 '<td>' + esc(order.customerName) + '</td>' +
                 '<td>' + esc(order.total_price) + ' ' + esc(order.currency) + '</td>' +
