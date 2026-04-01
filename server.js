@@ -3755,6 +3755,7 @@ app.get("/shopify/orders-test", async (req, res) => {
     const shop = req.query.shop || req.headers["x-shopify-shop-domain"] || "";
 
     if (!shop) return res.status(400).send("Missing shop parameter.");
+    if (!/^[a-z0-9-]+\.myshopify\.com$/i.test(shop)) return res.status(400).send("Invalid shop parameter.");
 
     const shopData = await getShopFromDB(shop);
     if (!shopData || !shopData.access_token) {
@@ -3802,35 +3803,40 @@ app.get("/shopify/orders-test", async (req, res) => {
             rows.forEach(r => { waybillMap[r.orderNumber] = r.waybillNumber; });
         }
 
+        // Escape helper to prevent XSS when injecting external data into HTML
+        const escHtml = s => String(s == null ? "" : s)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
         // Build order rows HTML
         let rowsHtml = "";
         for (const order of orders) {
             const waybill = waybillMap[order.name];
             const synced = !!waybill;
             const statusBadge = synced
-                ? `<span class="badge synced">✓ ${waybill}</span>`
+                ? `<span class="badge synced">✓ ${escHtml(waybill)}</span>`
                 : `<span class="badge pending">Pending</span>`;
             const customerName = order.shipping_address
                 ? `${order.shipping_address.first_name || ""} ${order.shipping_address.last_name || ""}`.trim()
                 : (order.email || "—");
             rowsHtml += `
-            <tr data-order-id="${order.id}" data-order-name="${order.name}">
+            <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}">
                 <td class="cb-col">
-                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}" onclick="updateSyncButton()">`}
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-name="${escHtml(order.name)}" onchange="updateSyncButton()">`}
                 </td>
-                <td><strong>${order.name}</strong></td>
-                <td>${customerName}</td>
-                <td>${order.total_price} ${order.currency}</td>
+                <td><strong>${escHtml(order.name)}</strong></td>
+                <td>${escHtml(customerName)}</td>
+                <td>${escHtml(order.total_price)} ${escHtml(order.currency)}</td>
                 <td>${new Date(order.created_at).toLocaleDateString()}</td>
                 <td>${statusBadge}</td>
-                <td class="result-col" id="result-${order.id}"></td>
+                <td class="result-col" id="result-${escHtml(order.id)}"></td>
             </tr>`;
         }
 
         const paginationHtml = `
             <div class="pagination">
-                ${prevPageInfo ? `<a href="/shopify/orders-test?shop=${shop}&page_info=${encodeURIComponent(prevPageInfo)}" class="btn-page">← Prev</a>` : `<span class="btn-page disabled">← Prev</span>`}
-                ${nextPageInfo ? `<a href="/shopify/orders-test?shop=${shop}&page_info=${encodeURIComponent(nextPageInfo)}" class="btn-page">Next →</a>` : `<span class="btn-page disabled">Next →</span>`}
+                ${prevPageInfo ? `<a href="/shopify/orders-test?shop=${encodeURIComponent(shop)}&page_info=${encodeURIComponent(prevPageInfo)}" class="btn-page">← Prev</a>` : `<span class="btn-page disabled">← Prev</span>`}
+                ${nextPageInfo ? `<a href="/shopify/orders-test?shop=${encodeURIComponent(shop)}&page_info=${encodeURIComponent(nextPageInfo)}" class="btn-page">Next →</a>` : `<span class="btn-page disabled">Next →</span>`}
             </div>`;
 
         const html = `<!DOCTYPE html>
@@ -3941,6 +3947,12 @@ app.get("/shopify/orders-test", async (req, res) => {
     <script>
         const SHOP = ${JSON.stringify(shop)};
 
+        function esc(s) {
+            return String(s == null ? "" : s)
+                .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
         function getChecked() {
             return Array.from(document.querySelectorAll(".order-cb:checked"));
         }
@@ -4006,52 +4018,59 @@ app.get("/shopify/orders-test", async (req, res) => {
                 progressFill.style.width = "80%";
                 const data = await resp.json();
 
-                let done = 0;
                 (data.results || []).forEach(r => {
-                    done++;
                     const resultCell = document.getElementById("result-" + r.orderId);
                     if (!resultCell) return;
                     if (r.success) {
-                        resultCell.innerHTML = '<span class="badge synced">✓ ' + (r.waybill || "Synced") + '</span>';
+                        resultCell.innerHTML = '<span class="badge synced">✓ ' + esc(r.waybill || "Synced") + '</span>';
                         // Update waybill column
                         const row = resultCell.closest("tr");
                         const waybillCell = row.querySelector("td:nth-child(6)");
-                        if (waybillCell && r.waybill) waybillCell.innerHTML = '<span class="badge synced">✓ ' + r.waybill + '</span>';
+                        if (waybillCell && r.waybill) waybillCell.innerHTML = '<span class="badge synced">✓ ' + esc(r.waybill) + '</span>';
                         // Remove checkbox
                         const cbCell = row.querySelector(".cb-col");
                         if (cbCell) cbCell.innerHTML = "";
                     } else if (r.skipped) {
                         resultCell.innerHTML = '<span class="badge synced">Already synced</span>';
                     } else {
-                        resultCell.innerHTML = '<span class="badge error" title="' + (r.error || "Error") + '">✗ Failed</span>';
+                        resultCell.innerHTML = '<span class="badge error" title="' + esc(r.error || "Error") + '">✗ Failed</span>';
                     }
                 });
 
                 progressFill.style.width = "100%";
                 setTimeout(() => { progressBar.style.display = "none"; progressFill.style.width = "0%"; }, 800);
 
-            } catch (err) {
-                alert("Network error: " + err.message);
-                progressBar.style.display = "none";
-            }
+                btn.textContent = "Sync Selected (0)";
+                btn.disabled = true;
+                document.getElementById("selectAll").checked = false;
 
-            btn.textContent = "Sync Selected (0)";
-            btn.disabled = true;
-            document.getElementById("selectAll").checked = false;
+            } catch (err) {
+                // Reset badges for orders that were not confirmed synced
+                checked.forEach(c => {
+                    const resultCell = document.getElementById("result-" + c.value);
+                    if (resultCell && resultCell.querySelector(".syncing")) {
+                        resultCell.innerHTML = "";
+                    }
+                });
+                progressBar.style.display = "none";
+                btn.disabled = false;
+                updateSyncButton();
+                alert("Network error: " + err.message);
+            }
         }
 
         // ---- Find All Unsynced Orders ----
 
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString();
-            return '<tr data-order-id="' + order.id + '" data-order-name="' + order.name + '">' +
-                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '" onclick="updateSyncButton()"></td>' +
-                '<td><strong>' + order.name + '</strong></td>' +
-                '<td>' + order.customerName + '</td>' +
-                '<td>' + order.total_price + ' ' + order.currency + '</td>' +
+            return '<tr data-order-id="' + esc(order.id) + '" data-order-name="' + esc(order.name) + '">' +
+                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + esc(order.id) + '" data-name="' + esc(order.name) + '" onchange="updateSyncButton()"></td>' +
+                '<td><strong>' + esc(order.name) + '</strong></td>' +
+                '<td>' + esc(order.customerName) + '</td>' +
+                '<td>' + esc(order.total_price) + ' ' + esc(order.currency) + '</td>' +
                 '<td>' + date + '</td>' +
                 '<td><span class="badge pending">Pending</span></td>' +
-                '<td class="result-col" id="result-' + order.id + '"></td>' +
+                '<td class="result-col" id="result-' + esc(order.id) + '"></td>' +
                 '</tr>';
         }
 
@@ -4120,6 +4139,9 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
     if (!shop || !Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "Missing shop or orderIds array" });
     }
+    if (!/^[a-z0-9-]+\.myshopify\.com$/i.test(shop)) {
+        return res.status(400).json({ error: "Invalid shop parameter" });
+    }
 
     const shopData = await getShopFromDB(shop);
     if (!shopData || !shopData.access_token) {
@@ -4187,6 +4209,11 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
             console.error(`⛔ Manual sync error for order ${orderId}:`, err);
             results.push({ orderId, success: false, error: err.message });
         }
+
+        // Small delay between orders to avoid hitting Shopify REST rate limits (~2 req/s)
+        if (orderIds.indexOf(orderId) < orderIds.length - 1) {
+            await new Promise(r => setTimeout(r, 500));
+        }
     }
 
     res.json({ results });
@@ -4196,6 +4223,7 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
 app.get("/shopify/unsynced-orders", async (req, res) => {
     const shop = req.query.shop || req.headers["x-shopify-shop-domain"] || "";
     if (!shop) return res.status(400).json({ error: "Missing shop parameter" });
+    if (!/^[a-z0-9-]+\.myshopify\.com$/i.test(shop)) return res.status(400).json({ error: "Invalid shop parameter" });
 
     const shopData = await getShopFromDB(shop);
     if (!shopData || !shopData.access_token) {
