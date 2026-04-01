@@ -178,9 +178,9 @@ async function saveShipmentToMySQL(shipment) {
 // ======================
 async function saveShipmentToOrdersTable(shipment) {
     try {
-        // 1. Generar Waybill Number de forma atómica
-        const newWaybillNumber = await generateNextWaybillNumber();
-        console.log("🔢 Generated Waybill:", newWaybillNumber);
+        // 1. Usar waybill del portal si ya fue asignado, si no generar localmente como fallback
+        const newWaybillNumber = shipment.waybillNumber || await generateNextWaybillNumber();
+        console.log("🔢 Waybill para orders table:", newWaybillNumber);
 
         const [result] = await db.execute(
             `INSERT INTO orders (
@@ -294,10 +294,6 @@ async function saveShipmentToOrdersTable(shipment) {
 
         const insertedOrderId = result.insertId;
         console.log("📥 Shipment inserted into `orders` table, id:", insertedOrderId);
-
-        // Retornar id y waybill generado para que el webhook pueda actualizarlos si el portal asigna otro
-        shipment._ordersTableId = insertedOrderId;
-        shipment._localWaybill = newWaybillNumber;
 
         // 2. Si tiene COD, crear registro en codRecords
         if (shipment.codRequired && shipment.codAmount > 0) {
@@ -576,7 +572,7 @@ app.post("/webhooks/shopify", webhookMiddleware, (req, res) => {
         try {
             const bodyStr = req.body.toString("utf8");
             let payload = {};
-            try { payload = JSON.parse(bodyStr); } catch (_) {}
+            try { payload = JSON.parse(bodyStr); } catch (_) { }
 
             switch (topic) {
                 case "customers/data_request": {
@@ -733,23 +729,17 @@ app.post(
             console.log("🚚 Shipment ready to save to MySQL:");
             console.dir(shipment, { depth: null });
 
-            // 1) log / auditoría Shopify
+            // 1) Enviar al portal PathXpress primero para obtener el waybill oficial
+            const portalWaybill = await sendShipmentToPathxpress(shipment);
+            if (portalWaybill) {
+                shipment.waybillNumber = portalWaybill;
+            }
+
+            // 2) log / auditoría Shopify (ya con el waybill correcto)
             await saveShipmentToMySQL(shipment);
 
-            // 2) insertar en tabla principal orders
+            // 3) insertar en tabla principal orders (usa shipment.waybillNumber del portal)
             await saveShipmentToOrdersTable(shipment);
-
-            // 3) enviar al portal PathXpress
-            const portalWaybill = await sendShipmentToPathxpress(shipment);
-
-            // 4) Si el portal asignó un waybill diferente (con sufijo), actualizar en DB
-            if (portalWaybill && portalWaybill !== shipment._localWaybill && shipment._ordersTableId) {
-                await db.execute(
-                    "UPDATE orders SET waybillNumber = ? WHERE id = ?",
-                    [portalWaybill, shipment._ordersTableId]
-                );
-                console.log(`🔄 Waybill actualizado en DB: ${shipment._localWaybill} → ${portalWaybill}`);
-            }
 
         } catch (e) {
             console.log("⚠️ Error processing webhook order:", e);
@@ -1613,7 +1603,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         statusStyle = 'background:rgba(34,197,94,0.2);color:#22c55e;border:1px solid rgba(34,197,94,0.3);';
                     } else if (row.status === 'PENDING_PICKUP') {
                         statusStyle = 'background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);';
-                    } else if (['CANCELLED','RETURNED'].includes(row.status)) {
+                    } else if (['CANCELLED', 'RETURNED'].includes(row.status)) {
                         statusStyle = 'background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);';
                     } else {
                         statusStyle = 'background:rgba(45,108,246,0.2);color:#2D6CF6;border:1px solid rgba(45,108,246,0.3);';
@@ -3754,89 +3744,347 @@ app.get("/auth/callback", async (req, res) => {
 });
 
 // ======================
-// 7) TEST: VER ÓRDENES
+// 7) GESTIÓN DE ÓRDENES + SYNC MANUAL
 // ======================
+
+// --- Página de gestión de órdenes ---
 app.get("/shopify/orders-test", async (req, res) => {
-    const shop =
-        req.query.shop || req.headers["x-shopify-shop-domain"] || "";
+    const shop = req.query.shop || req.headers["x-shopify-shop-domain"] || "";
 
-    if (!shop) {
-        return res.status(400).send("Missing shop parameter.");
+    if (!shop) return res.status(400).send("Missing shop parameter.");
+
+    const shopData = await getShopFromDB(shop);
+    if (!shopData || !shopData.access_token) {
+        return res.status(401).send("This shop is not yet connected to PATHXPRESS.");
     }
 
-    const accessToken = shopsTokens[shop];
-    if (!accessToken) {
-        return res
-            .status(401)
-            .send("This shop is not yet connected to PATHXPRESS.");
-    }
+    const limit = 25;
+    const pageInfo = req.query.page_info || null;
 
     try {
-        const url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=5&status=any`;
-
-        console.log("👉 Calling Shopify:", url);
+        let url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=${limit}&status=any`;
+        if (pageInfo) url += `&page_info=${encodeURIComponent(pageInfo)}`;
 
         const response = await fetch(url, {
-            method: "GET",
-            headers: {
-                "X-Shopify-Access-Token": accessToken,
-                "Content-Type": "application/json",
-            },
+            headers: { "X-Shopify-Access-Token": shopData.access_token }
         });
 
-        const text = await response.text();
-        console.log("🔎 Shopify Response:", response.status, text);
-
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            console.error("Could not parse JSON:", e);
-            return res
-                .status(500)
-                .send("Error parsing Shopify response. Check console.");
-        }
-
         if (!response.ok) {
-            return res
-                .status(response.status)
-                .send(
-                    `<pre>Shopify Error (${response.status}):\n${text}</pre>`
-                );
+            const errText = await response.text();
+            return res.status(response.status).send(`<pre>Shopify Error (${response.status}):\n${errText}</pre>`);
         }
 
+        const data = await response.json();
         const orders = data.orders || [];
 
-        let html = `
-      <html>
-        <head><meta charset="utf-8"><title>Shopify Orders</title></head>
-        <body style="font-family: Arial; padding: 20px;">
-          <h1>Latest orders from ${shop}</h1>
-    `;
+        // Pagination cursors from Link header
+        const linkHeader = response.headers.get("link") || "";
+        const nextMatch = linkHeader.match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="next"/);
+        const prevMatch = linkHeader.match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="previous"/);
+        const nextPageInfo = nextMatch ? nextMatch[1] : null;
+        const prevPageInfo = prevMatch ? prevMatch[1] : null;
 
-        if (orders.length === 0) {
-            html += "<p>No orders yet.</p>";
-        } else {
-            html += "<ul>";
-            for (const order of orders) {
-                html += `<li>#${order.name} – total: ${order.total_price} ${order.currency}</li>`;
-            }
-            html += "</ul>";
+        // Check which orders already have a waybill in DB
+        const orderNames = orders.map(o => o.name);
+        let waybillMap = {};
+        if (orderNames.length > 0) {
+            const placeholders = orderNames.map(() => "?").join(",");
+            const clientId = shopData.pathxpress_client_id || 1;
+            const [rows] = await db.execute(
+                `SELECT orderNumber, waybillNumber FROM orders WHERE clientId = ? AND orderNumber IN (${placeholders})`,
+                [clientId, ...orderNames]
+            );
+            rows.forEach(r => { waybillMap[r.orderNumber] = r.waybillNumber; });
         }
 
-        html += `
-          <p><a href="/app?shop=${shop}">Back to PATHXPRESS Portal</a></p>
-        </body>
-      </html>
-    `;
+        // Build order rows HTML
+        let rowsHtml = "";
+        for (const order of orders) {
+            const waybill = waybillMap[order.name];
+            const synced = !!waybill;
+            const statusBadge = synced
+                ? `<span class="badge synced">✓ ${waybill}</span>`
+                : `<span class="badge pending">Pending</span>`;
+            const customerName = order.shipping_address
+                ? `${order.shipping_address.first_name || ""} ${order.shipping_address.last_name || ""}`.trim()
+                : (order.email || "—");
+            rowsHtml += `
+            <tr data-order-id="${order.id}" data-order-name="${order.name}">
+                <td class="cb-col">
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}">`}
+                </td>
+                <td><strong>${order.name}</strong></td>
+                <td>${customerName}</td>
+                <td>${order.total_price} ${order.currency}</td>
+                <td>${new Date(order.created_at).toLocaleDateString()}</td>
+                <td>${statusBadge}</td>
+                <td class="result-col" id="result-${order.id}"></td>
+            </tr>`;
+        }
+
+        const paginationHtml = `
+            <div class="pagination">
+                ${prevPageInfo ? `<a href="/shopify/orders-test?shop=${shop}&page_info=${encodeURIComponent(prevPageInfo)}" class="btn-page">← Prev</a>` : `<span class="btn-page disabled">← Prev</span>`}
+                ${nextPageInfo ? `<a href="/shopify/orders-test?shop=${shop}&page_info=${encodeURIComponent(nextPageInfo)}" class="btn-page">Next →</a>` : `<span class="btn-page disabled">Next →</span>`}
+            </div>`;
+
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Order Management – PathXpress</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f6f7; color: #1a1a2e; }
+        .header { background: #fff; border-bottom: 1px solid #e1e3e5; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .header .shop-name { font-size: 13px; color: #6d7175; }
+        .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+        .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .btn-sync { background: #008060; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+        .btn-sync:hover { background: #006b52; }
+        .btn-sync:disabled { background: #b5b5b5; cursor: not-allowed; }
+        .select-info { font-size: 13px; color: #6d7175; }
+        .card { background: #fff; border: 1px solid #e1e3e5; border-radius: 8px; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        thead th { background: #f6f6f7; padding: 10px 14px; text-align: left; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6d7175; border-bottom: 1px solid #e1e3e5; }
+        tbody tr { border-bottom: 1px solid #f1f1f1; transition: background 0.1s; }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:hover { background: #fafafa; }
+        tbody tr.selected { background: #f0f9f5; }
+        td { padding: 12px 14px; font-size: 13px; vertical-align: middle; }
+        .cb-col { width: 36px; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+        .badge.synced { background: #d4edda; color: #155724; }
+        .badge.pending { background: #fff3cd; color: #856404; }
+        .badge.error { background: #f8d7da; color: #721c24; }
+        .badge.syncing { background: #cce5ff; color: #004085; }
+        .pagination { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+        .btn-page { padding: 7px 14px; border-radius: 5px; border: 1px solid #c9cccf; background: #fff; font-size: 13px; color: #1a1a2e; text-decoration: none; }
+        .btn-page.disabled { color: #b5b5b5; cursor: default; pointer-events: none; }
+        .btn-page:not(.disabled):hover { background: #f6f6f7; }
+        .progress-bar { display: none; height: 3px; background: #e1e3e5; border-radius: 2px; margin-bottom: 16px; overflow: hidden; }
+        .progress-bar .fill { height: 100%; background: #008060; transition: width 0.3s; width: 0%; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>Order Management</h1>
+            <div class="shop-name">${shop}</div>
+        </div>
+        <a href="/app?shop=${shop}" style="font-size:13px;color:#008060;text-decoration:none;">← Back to Portal</a>
+    </div>
+    <div class="container">
+        <div class="toolbar">
+            <button class="btn-sync" id="syncBtn" disabled onclick="syncSelected()">Sync Selected (0)</button>
+            <label style="font-size:13px;cursor:pointer;">
+                <input type="checkbox" id="selectAll" onchange="toggleAll(this)"> Select all pending
+            </label>
+            <span class="select-info" id="selectInfo">Select orders without waybill to sync them to PathXpress.</span>
+        </div>
+        <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Order</th>
+                        <th>Customer</th>
+                        <th>Total</th>
+                        <th>Date</th>
+                        <th>Waybill</th>
+                        <th>Result</th>
+                    </tr>
+                </thead>
+                <tbody id="ordersBody">
+                    ${rowsHtml || '<tr><td colspan="7" style="text-align:center;padding:24px;color:#6d7175;">No orders found.</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+        ${paginationHtml}
+    </div>
+    <script>
+        const SHOP = ${JSON.stringify(shop)};
+
+        function getChecked() {
+            return Array.from(document.querySelectorAll(".order-cb:checked"));
+        }
+
+        function updateSyncButton() {
+            const checked = getChecked();
+            const btn = document.getElementById("syncBtn");
+            btn.textContent = "Sync Selected (" + checked.length + ")";
+            btn.disabled = checked.length === 0;
+        }
+
+        function toggleAll(cb) {
+            document.querySelectorAll(".order-cb").forEach(c => {
+                c.checked = cb.checked;
+                c.closest("tr").classList.toggle("selected", cb.checked);
+            });
+            updateSyncButton();
+        }
+
+        document.querySelectorAll(".order-cb").forEach(cb => {
+            cb.addEventListener("change", function() {
+                this.closest("tr").classList.toggle("selected", this.checked);
+                updateSyncButton();
+                document.getElementById("selectAll").checked = false;
+            });
+        });
+
+        async function syncSelected() {
+            const checked = getChecked();
+            if (checked.length === 0) return;
+
+            const orderIds = checked.map(c => c.value);
+            const btn = document.getElementById("syncBtn");
+            btn.disabled = true;
+            btn.textContent = "Syncing...";
+
+            const progressBar = document.getElementById("progressBar");
+            const progressFill = document.getElementById("progressFill");
+            progressBar.style.display = "block";
+            progressFill.style.width = "10%";
+
+            // Set all selected rows to syncing state
+            checked.forEach(c => {
+                const resultCell = document.getElementById("result-" + c.value);
+                if (resultCell) resultCell.innerHTML = '<span class="badge syncing">Syncing…</span>';
+            });
+
+            try {
+                const resp = await fetch("/shopify/manual-sync", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ shop: SHOP, orderIds })
+                });
+
+                progressFill.style.width = "80%";
+                const data = await resp.json();
+
+                let done = 0;
+                (data.results || []).forEach(r => {
+                    done++;
+                    const resultCell = document.getElementById("result-" + r.orderId);
+                    if (!resultCell) return;
+                    if (r.success) {
+                        resultCell.innerHTML = '<span class="badge synced">✓ ' + (r.waybill || "Synced") + '</span>';
+                        // Update waybill column
+                        const row = resultCell.closest("tr");
+                        const waybillCell = row.querySelector("td:nth-child(6)");
+                        if (waybillCell && r.waybill) waybillCell.innerHTML = '<span class="badge synced">✓ ' + r.waybill + '</span>';
+                        // Remove checkbox
+                        const cbCell = row.querySelector(".cb-col");
+                        if (cbCell) cbCell.innerHTML = "";
+                    } else if (r.skipped) {
+                        resultCell.innerHTML = '<span class="badge synced">Already synced</span>';
+                    } else {
+                        resultCell.innerHTML = '<span class="badge error" title="' + (r.error || "Error") + '">✗ Failed</span>';
+                    }
+                });
+
+                progressFill.style.width = "100%";
+                setTimeout(() => { progressBar.style.display = "none"; progressFill.style.width = "0%"; }, 800);
+
+            } catch (err) {
+                alert("Network error: " + err.message);
+                progressBar.style.display = "none";
+            }
+
+            btn.textContent = "Sync Selected (0)";
+            btn.disabled = true;
+            document.getElementById("selectAll").checked = false;
+        }
+    </script>
+</body>
+</html>`;
 
         res.send(html);
     } catch (err) {
         console.error("Error reading Shopify orders:", err);
-        res
-            .status(500)
-            .send("Error reading Shopify orders (check console).");
+        res.status(500).send("Error reading Shopify orders (check console).");
     }
+});
+
+// --- Endpoint de sincronización manual (batch) ---
+app.post("/shopify/manual-sync", express.json(), async (req, res) => {
+    const { shop, orderIds } = req.body || {};
+
+    if (!shop || !Array.isArray(orderIds) || orderIds.length === 0) {
+        return res.status(400).json({ error: "Missing shop or orderIds array" });
+    }
+
+    const shopData = await getShopFromDB(shop);
+    if (!shopData || !shopData.access_token) {
+        return res.status(401).json({ error: "Shop not connected to PathXpress" });
+    }
+
+    const clientId = shopData.pathxpress_client_id || 1;
+    const results = [];
+
+    for (const orderId of orderIds) {
+        try {
+            // 1. Fetch order from Shopify
+            const orderRes = await fetch(
+                `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders/${orderId}.json`,
+                { headers: { "X-Shopify-Access-Token": shopData.access_token } }
+            );
+
+            if (!orderRes.ok) {
+                results.push({ orderId, success: false, error: `Shopify returned ${orderRes.status}` });
+                continue;
+            }
+
+            const { order } = await orderRes.json();
+
+            // 2. Check for duplicate (already has a waybill)
+            const [existing] = await db.execute(
+                `SELECT waybillNumber FROM orders WHERE clientId = ? AND orderNumber = ? AND waybillNumber IS NOT NULL AND waybillNumber != ''`,
+                [clientId, order.name]
+            );
+
+            if (existing.length > 0) {
+                results.push({
+                    orderId,
+                    orderName: order.name,
+                    success: false,
+                    skipped: true,
+                    waybill: existing[0].waybillNumber,
+                    error: `Already synced (${existing[0].waybillNumber})`
+                });
+                continue;
+            }
+
+            // 3. Get assigned location (branch shipping address)
+            const assignedLocation = await getOrderAssignedLocation(shop, shopData.access_token, order.id);
+
+            // 4. Full sync flow
+            const shipment = orderToShipment(order, shop, shopData, assignedLocation);
+
+            const portalWaybill = await sendShipmentToPathxpress(shipment);
+            if (portalWaybill) shipment.waybillNumber = portalWaybill;
+
+            await saveShipmentToMySQL(shipment);
+            await saveShipmentToOrdersTable(shipment);
+
+            console.log(`✅ Manual sync OK: ${order.name} → waybill: ${shipment.waybillNumber || "none"}`);
+
+            results.push({
+                orderId,
+                orderName: order.name,
+                success: true,
+                waybill: shipment.waybillNumber || null
+            });
+
+        } catch (err) {
+            console.error(`⛔ Manual sync error for order ${orderId}:`, err);
+            results.push({ orderId, success: false, error: err.message });
+        }
+    }
+
+    res.json({ results });
 });
 
 
@@ -4782,30 +5030,19 @@ async function sendShipmentToPathxpress(shipment) {
             }
         );
 
-        const text = await response.text();
-        console.log(
-            "📝 Respuesta portal.customer.createShipment:",
-            response.status,
-            text
-        );
+        const json = await response.json();
+        // tRPC batch response: [{ result: { data: { waybillNumber: "PX202600001-K7X", ... } } }]
+        const portalWaybill = json?.[0]?.result?.data?.waybillNumber;
 
-        // Parsear respuesta tRPC para extraer el waybill asignado por el portal
-        try {
-            const json = JSON.parse(text);
-            // tRPC batch response: [{ result: { data: { waybillNumber: "..." } } }]
-            const portalWaybill = json?.[0]?.result?.data?.waybillNumber;
-            if (portalWaybill) {
-                console.log("✅ Portal asignó waybill:", portalWaybill);
-                return portalWaybill;
-            }
-        } catch (_) {}
+        if (portalWaybill) {
+            console.log("✅ Portal asignó waybill:", portalWaybill);
+            return portalWaybill;
+        }
 
+        console.warn("⚠️ Portal no retornó waybill. Respuesta:", response.status, JSON.stringify(json));
         return null;
     } catch (err) {
-        console.error(
-            "⛔ Error enviando shipment a PATHXPRESS Portal:",
-            err
-        );
+        console.error("⛔ Error enviando shipment a PATHXPRESS Portal:", err);
         return null;
     }
 }
