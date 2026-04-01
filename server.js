@@ -4090,7 +4090,12 @@ app.get("/shopify/orders-test", async (req, res) => {
                 }
                 paginationDiv.innerHTML = "";
                 if (data.hasMore && data.nextPageInfo) {
-                    paginationDiv.innerHTML = '<button class="btn-find" onclick="findUnsynced(\'' + encodeURIComponent(data.nextPageInfo) + '\')">Load More</button>';
+                    var loadBtn = document.createElement("button");
+                    loadBtn.className = "btn-find";
+                    loadBtn.textContent = "Load More";
+                    loadBtn.setAttribute("data-cursor", encodeURIComponent(data.nextPageInfo));
+                    loadBtn.onclick = function() { findUnsynced(this.getAttribute("data-cursor")); };
+                    paginationDiv.appendChild(loadBtn);
                 }
                 updateSyncButton();
                 findBtn.disabled = false;
