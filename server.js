@@ -3962,20 +3962,16 @@ app.get("/shopify/orders-test", async (req, res) => {
             updateSyncButton();
         }
 
-        // Event delegation — captura cambios en CUALQUIER checkbox .order-cb
-        // incluyendo los que se agregan dinámicamente (Find Unsynced)
+        // Event delegation — solo para checkboxes .order-cb individuales
+        // selectAll ya está manejado por onchange="toggleAll(this)" en el HTML
         document.addEventListener("change", function(e) {
             var t = e.target;
-            if (!t) return;
-            if (t.id === "selectAll") {
-                toggleAll(t);
-                return;
-            }
+            if (!t || t.id === "selectAll") return;
             if (t.classList && t.classList.contains("order-cb")) {
                 var row = t.closest("tr");
                 if (row) row.classList.toggle("selected", t.checked);
                 var sa = document.getElementById("selectAll");
-                if (sa) sa.checked = false;
+                if (sa && !t.checked) sa.checked = false;
                 updateSyncButton();
             }
         });
