@@ -2750,7 +2750,10 @@ app.get("/app", requireSessionToken, async (req, res) => {
               </div>
 
               <div class="card">
-                <h2><i data-lucide="package" class="icon"></i>My PathXpress Shipments</h2>
+                <h2 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+                  <span><i data-lucide="package" class="icon"></i>My PathXpress Shipments</span>
+                  <a href="/shopify/orders-test?shop=${shop}" target="_blank" style="font-size:13px;font-weight:500;padding:8px 16px;background:#1a73e8;color:#fff;border-radius:8px;text-decoration:none;white-space:nowrap;">⚡ Order Management</a>
+                </h2>
 
                 <!-- Filter tabs + search -->
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap;">
