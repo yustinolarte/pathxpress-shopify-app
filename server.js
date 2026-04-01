@@ -3125,18 +3125,17 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     try {
         // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express, auto_returns)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express)
+             VALUES(?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 pathxpress_client_id = VALUES(pathxpress_client_id),
-    default_service_type = VALUES(default_service_type),
-    auto_sync = VALUES(auto_sync),
-    sync_tag = VALUES(sync_tag),
-    free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
-    free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
-    auto_returns = VALUES(auto_returns),
-    updated_at = CURRENT_TIMESTAMP`,
-            [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingDOMValue, freeShippingExpressValue, isAutoReturns]
+                default_service_type = VALUES(default_service_type),
+                auto_sync = VALUES(auto_sync),
+                sync_tag = VALUES(sync_tag),
+                free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
+                free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
+                updated_at = CURRENT_TIMESTAMP`,
+            [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingDOMValue, freeShippingExpressValue]
         );
         console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync}, AutoReturns = ${isAutoReturns}`);
 
