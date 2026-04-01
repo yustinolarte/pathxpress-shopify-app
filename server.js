@@ -295,6 +295,10 @@ async function saveShipmentToOrdersTable(shipment) {
         const insertedOrderId = result.insertId;
         console.log("📥 Shipment inserted into `orders` table, id:", insertedOrderId);
 
+        // Retornar id y waybill generado para que el webhook pueda actualizarlos si el portal asigna otro
+        shipment._ordersTableId = insertedOrderId;
+        shipment._localWaybill = newWaybillNumber;
+
         // 2. Si tiene COD, crear registro en codRecords
         if (shipment.codRequired && shipment.codAmount > 0) {
             try {
@@ -736,7 +740,16 @@ app.post(
             await saveShipmentToOrdersTable(shipment);
 
             // 3) enviar al portal PathXpress
-            await sendShipmentToPathxpress(shipment);
+            const portalWaybill = await sendShipmentToPathxpress(shipment);
+
+            // 4) Si el portal asignó un waybill diferente (con sufijo), actualizar en DB
+            if (portalWaybill && portalWaybill !== shipment._localWaybill && shipment._ordersTableId) {
+                await db.execute(
+                    "UPDATE orders SET waybillNumber = ? WHERE id = ?",
+                    [portalWaybill, shipment._ordersTableId]
+                );
+                console.log(`🔄 Waybill actualizado en DB: ${shipment._localWaybill} → ${portalWaybill}`);
+            }
 
         } catch (e) {
             console.log("⚠️ Error processing webhook order:", e);
@@ -4775,11 +4788,25 @@ async function sendShipmentToPathxpress(shipment) {
             response.status,
             text
         );
+
+        // Parsear respuesta tRPC para extraer el waybill asignado por el portal
+        try {
+            const json = JSON.parse(text);
+            // tRPC batch response: [{ result: { data: { waybillNumber: "..." } } }]
+            const portalWaybill = json?.[0]?.result?.data?.waybillNumber;
+            if (portalWaybill) {
+                console.log("✅ Portal asignó waybill:", portalWaybill);
+                return portalWaybill;
+            }
+        } catch (_) {}
+
+        return null;
     } catch (err) {
         console.error(
             "⛔ Error enviando shipment a PATHXPRESS Portal:",
             err
         );
+        return null;
     }
 }
 
