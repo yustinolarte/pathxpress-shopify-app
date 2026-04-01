@@ -3816,7 +3816,7 @@ app.get("/shopify/orders-test", async (req, res) => {
             rowsHtml += `
             <tr data-order-id="${order.id}" data-order-name="${order.name}">
                 <td class="cb-col">
-                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}">`}
+                    ${synced ? "" : `<input type="checkbox" class="order-cb" value="${order.id}" data-name="${order.name}" onclick="updateSyncButton()">`}
                 </td>
                 <td><strong>${order.name}</strong></td>
                 <td>${customerName}</td>
@@ -4045,7 +4045,7 @@ app.get("/shopify/orders-test", async (req, res) => {
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString();
             return '<tr data-order-id="' + order.id + '" data-order-name="' + order.name + '">' +
-                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '"></td>' +
+                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '" onclick="updateSyncButton()"></td>' +
                 '<td><strong>' + order.name + '</strong></td>' +
                 '<td>' + order.customerName + '</td>' +
                 '<td>' + order.total_price + ' ' + order.currency + '</td>' +
