@@ -3865,6 +3865,11 @@ app.get("/shopify/orders-test", async (req, res) => {
         .btn-page:not(.disabled):hover { background: #f6f6f7; }
         .progress-bar { display: none; height: 3px; background: #e1e3e5; border-radius: 2px; margin-bottom: 16px; overflow: hidden; }
         .progress-bar .fill { height: 100%; background: #008060; transition: width 0.3s; width: 0%; }
+        .btn-find { background: #1a73e8; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+        .btn-find:hover { background: #1558b0; }
+        .btn-find:disabled { background: #b5b5b5; cursor: not-allowed; }
+        .scan-status { font-size: 13px; color: #6d7175; }
+        .section-label { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6d7175; margin: 24px 0 8px; }
     </style>
 </head>
 <body>
@@ -3903,6 +3908,30 @@ app.get("/shopify/orders-test", async (req, res) => {
             </table>
         </div>
         ${paginationHtml}
+        <div class="toolbar" style="margin-top:16px;">
+            <button class="btn-find" id="findUnsyncedBtn" onclick="findUnsynced()">Find All Unsynced Orders</button>
+            <span class="scan-status" id="scanStatus"></span>
+        </div>
+        <div id="unsyncedSection" style="display:none;margin-top:8px;">
+            <div class="section-label">Unsynced Orders Found</div>
+            <div class="card">
+                <table>
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Order</th>
+                            <th>Customer</th>
+                            <th>Total</th>
+                            <th>Date</th>
+                            <th>Waybill</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="unsyncedBody"></tbody>
+                </table>
+            </div>
+            <div id="unsyncedPagination" style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;"></div>
+        </div>
     </div>
     <script>
         const SHOP = ${JSON.stringify(shop)};
@@ -3997,6 +4026,78 @@ app.get("/shopify/orders-test", async (req, res) => {
             btn.disabled = true;
             document.getElementById("selectAll").checked = false;
         }
+
+        // ---- Find All Unsynced Orders ----
+
+        function renderUnsyncedRow(order) {
+            var date = new Date(order.created_at).toLocaleDateString();
+            return '<tr data-order-id="' + order.id + '" data-order-name="' + order.name + '">' +
+                '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-name="' + order.name + '"></td>' +
+                '<td><strong>' + order.name + '</strong></td>' +
+                '<td>' + order.customerName + '</td>' +
+                '<td>' + order.total_price + ' ' + order.currency + '</td>' +
+                '<td>' + date + '</td>' +
+                '<td><span class="badge pending">Pending</span></td>' +
+                '<td class="result-col" id="result-' + order.id + '"></td>' +
+                '</tr>';
+        }
+
+        async function findUnsynced(pageInfo) {
+            const btn = document.getElementById("findUnsyncedBtn");
+            const scanStatus = document.getElementById("scanStatus");
+            const unsyncedSection = document.getElementById("unsyncedSection");
+            const unsyncedBody = document.getElementById("unsyncedBody");
+            const paginationDiv = document.getElementById("unsyncedPagination");
+
+            btn.disabled = true;
+            scanStatus.textContent = "Scanning Shopify orders…";
+
+            let url = "/shopify/unsynced-orders?shop=" + encodeURIComponent(SHOP);
+            if (pageInfo) url += "&page_info=" + encodeURIComponent(pageInfo);
+
+            try {
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error("Server error " + resp.status);
+                const data = await resp.json();
+
+                const orders = data.orders || [];
+
+                if (!pageInfo) unsyncedBody.innerHTML = "";
+
+                if (orders.length === 0 && !pageInfo) {
+                    scanStatus.textContent = "All orders are already synced!";
+                } else {
+                    orders.forEach(order => {
+                        unsyncedBody.insertAdjacentHTML("beforeend", renderUnsyncedRow(order));
+                    });
+
+                    // Attach change listeners to new checkboxes
+                    unsyncedBody.querySelectorAll(".order-cb").forEach(cb => {
+                        cb.addEventListener("change", function() {
+                            this.closest("tr").classList.toggle("selected", this.checked);
+                            updateSyncButton();
+                            document.getElementById("selectAll").checked = false;
+                        });
+                    });
+
+                    const total = unsyncedBody.querySelectorAll(".order-cb").length;
+                    scanStatus.textContent = "Found " + total + " unsynced order" + (total !== 1 ? "s" : "") + (data.hasMore ? " (more available)" : "");
+                    unsyncedSection.style.display = "block";
+                }
+
+                paginationDiv.innerHTML = "";
+                if (data.hasMore && data.nextPageInfo) {
+                    const cursor = data.nextPageInfo;
+                    paginationDiv.innerHTML = "<button class=\"btn-find\" onclick=\"findUnsynced('" + encodeURIComponent(cursor) + "')\">Load More →</button>";
+                }
+
+                updateSyncButton();
+            } catch (err) {
+                scanStatus.textContent = "Error during scan: " + err.message;
+            } finally {
+                btn.disabled = false;
+            }
+        }
     </script>
 </body>
 </html>`;
@@ -4087,7 +4188,97 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
     res.json({ results });
 });
 
+// --- Endpoint: buscar órdenes sin sincronizar ---
+app.get("/shopify/unsynced-orders", async (req, res) => {
+    const shop = req.query.shop || req.headers["x-shopify-shop-domain"] || "";
+    if (!shop) return res.status(400).json({ error: "Missing shop parameter" });
 
+    const shopData = await getShopFromDB(shop);
+    if (!shopData || !shopData.access_token) {
+        return res.status(401).json({ error: "Shop not connected to PathXpress" });
+    }
+
+    const clientId = shopData.pathxpress_client_id || 1;
+    const MAX_UNSYNCED = 200;
+    const MAX_PAGES = 10;
+
+    const unsyncedOrders = [];
+    let currentPageInfo = req.query.page_info || null;
+    let pagesScanned = 0;
+    let finalNextPageInfo = null;
+
+    try {
+        while (pagesScanned < MAX_PAGES && unsyncedOrders.length < MAX_UNSYNCED) {
+            let url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=250&status=any`;
+            if (currentPageInfo) url += `&page_info=${encodeURIComponent(currentPageInfo)}`;
+
+            const response = await fetch(url, {
+                headers: { "X-Shopify-Access-Token": shopData.access_token }
+            });
+
+            if (!response.ok) {
+                console.error(`⛔ Shopify error scanning orders: ${response.status}`);
+                break;
+            }
+
+            const data = await response.json();
+            const orders = data.orders || [];
+
+            if (orders.length === 0) break;
+
+            // Cross-reference with DB to find already-synced orders
+            const orderNames = orders.map(o => o.name);
+            const placeholders = orderNames.map(() => "?").join(",");
+            const [syncedRows] = await db.execute(
+                `SELECT orderNumber FROM orders WHERE clientId = ? AND orderNumber IN (${placeholders}) AND waybillNumber IS NOT NULL AND waybillNumber != ''`,
+                [clientId, ...orderNames]
+            );
+            const syncedSet = new Set(syncedRows.map(r => r.orderNumber));
+
+            for (const order of orders) {
+                if (!syncedSet.has(order.name)) {
+                    const shipping = order.shipping_address || {};
+                    const customer = order.customer || {};
+                    const customerName = `${shipping.first_name || ""} ${shipping.last_name || ""}`.trim()
+                        || customer.email || "—";
+                    unsyncedOrders.push({
+                        id: String(order.id),
+                        name: order.name,
+                        customerName,
+                        total_price: order.total_price,
+                        currency: order.currency,
+                        created_at: order.created_at
+                    });
+                    if (unsyncedOrders.length >= MAX_UNSYNCED) break;
+                }
+            }
+
+            // Parse next cursor from Link header
+            const linkHeader = response.headers.get("link") || "";
+            const nextMatch = linkHeader.match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="next"/);
+            currentPageInfo = nextMatch ? nextMatch[1] : null;
+            pagesScanned++;
+
+            if (!currentPageInfo) break;
+        }
+
+        const hasMore = !!(currentPageInfo && (pagesScanned >= MAX_PAGES || unsyncedOrders.length >= MAX_UNSYNCED));
+        if (hasMore) finalNextPageInfo = currentPageInfo;
+
+        console.log(`🔍 Unsynced scan: ${pagesScanned} pages, ${unsyncedOrders.length} unsynced found, hasMore: ${hasMore}`);
+
+        res.json({
+            orders: unsyncedOrders,
+            foundCount: unsyncedOrders.length,
+            hasMore,
+            nextPageInfo: finalNextPageInfo
+        });
+
+    } catch (err) {
+        console.error("⛔ Error scanning unsynced orders:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
 
 // ======================
 // 8) REGISTRO DEL WEBHOOK
