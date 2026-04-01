@@ -299,7 +299,27 @@ async function saveShipmentToOrdersTable(shipment) {
         const insertedOrderId = result.insertId;
         console.log("📥 Shipment inserted into `orders` table, id:", insertedOrderId);
 
-        // 2. Si tiene COD, crear registro en codRecords
+        // 2. Crear tracking event inicial (igual que portal.customer.createShipment)
+        try {
+            await db.execute(
+                `INSERT INTO trackingEvents (shipmentId, eventDatetime, statusCode, statusLabel, description, createdBy, createdAt)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    insertedOrderId,
+                    new Date(),
+                    "pending_pickup",
+                    "PENDING PICKUP",
+                    "Shipment created and awaiting pickup",
+                    "system",
+                    new Date()
+                ]
+            );
+            console.log("📍 Tracking event created for order:", insertedOrderId);
+        } catch (trackErr) {
+            console.error("⛔ Error creating tracking event:", trackErr);
+        }
+
+        // 3. Si tiene COD, crear registro en codRecords
         if (shipment.codRequired && shipment.codAmount > 0) {
             try {
                 await db.execute(
