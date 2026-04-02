@@ -771,8 +771,10 @@ app.post(
             // 2) log / auditoría Shopify (ya con el waybill correcto)
             await saveShipmentToMySQL(shipment);
 
-            // 3) insertar en tabla principal orders (usa shipment.waybillNumber del portal)
-            await saveShipmentToOrdersTable(shipment);
+            // 3) insertar en tabla principal orders solo si el portal no lo creó ya
+            if (!portalWaybill) {
+                await saveShipmentToOrdersTable(shipment);
+            }
 
         } catch (e) {
             console.log("⚠️ Error processing webhook order:", e);
@@ -4210,7 +4212,10 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
             if (portalWaybill) shipment.waybillNumber = portalWaybill;
 
             await saveShipmentToMySQL(shipment);
-            await saveShipmentToOrdersTable(shipment);
+            // If portal already created the order (returned waybill), skip local insert to avoid duplicate
+            if (!portalWaybill) {
+                await saveShipmentToOrdersTable(shipment);
+            }
 
             console.log(`✅ Manual sync OK: ${order.name} → waybill: ${shipment.waybillNumber || "none"}`);
 
