@@ -5096,7 +5096,7 @@ function orderToShipment(order, shop, shopData, assignedLocation = null) {
 
     // Datos del Shipper (Sucursal asignada o dirección general de la tienda)
     // Si hay assigned_location (sucursal), usamos esa dirección. Si no, fallback a shopData.
-    const shipperName = assignedLocation?.name || shopData?.shop_name || shop;
+    const shipperName = shopData?.shop_name || shop;
     const shipperAddress = assignedLocation?.address1 || shopData?.address1 || "";
     const shipperCity = assignedLocation?.city || shopData?.city || "Dubai";
     const shipperCountry = assignedLocation?.country_code || shopData?.country || "UAE";
