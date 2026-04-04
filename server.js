@@ -149,11 +149,13 @@ async function saveShipmentToMySQL(shipment) {
         cod_amount,
         currency,
         status,
-        items_description
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        items_description,
+        waybill_number
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         status = VALUES(status),
         items_description = VALUES(items_description),
+        waybill_number = COALESCE(VALUES(waybill_number), waybill_number),
         updated_at = CURRENT_TIMESTAMP`,
             [
                 shipment.shopDomain,
@@ -169,6 +171,7 @@ async function saveShipmentToMySQL(shipment) {
                 shipment.currency || null,
                 shipment.status || "pending_pickup",
                 shipment.itemsDescription || null,
+                shipment.waybillNumber || null,
             ]
         );
 
@@ -1644,10 +1647,6 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         ? `<button class="delete-btn" onclick="deleteOrder(${row.id}, '${row.orderNumber || ''}')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
                         : '';
 
-                    const editShipperBtn = row.status === 'PENDING_PICKUP' || row.status === 'pending_pickup'
-                        ? `<button class="edit-shipper-btn" onclick="openShipperModal(${row.id})" title="Change origin address" style="background:rgba(45,108,246,0.15);border:1px solid rgba(45,108,246,0.3);color:#2D6CF6;padding:6px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
-                        : '';
-
                     return `
                     <tr id="order-row-${row.id}" data-type="${typeKey}">
                         <td><strong style="color: var(--text-primary);">${row.orderNumber || '—'}</strong></td>
@@ -1661,7 +1660,6 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             ? `<button class="print-btn" onclick='generateWaybillPDF(${shipmentData})'><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>Print Label</button>`
                             : '<span style="color: var(--text-muted);">Pending</span>'
                         }
-                            ${editShipperBtn}
                             ${deleteBtn}
                         </td>
                     </tr>
@@ -4228,6 +4226,19 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
                     [clientId, ...orderNames]
                 );
                 portalRows.forEach(r => { waybillMap[r.orderNumber] = r.waybillNumber; });
+
+                // Secondary: check shopify_shipments.waybill_number (set when order was synced)
+                // Uses waybill_number IS NOT NULL so only genuinely synced orders match
+                const [syncedRows] = await db.execute(
+                    `SELECT shop_order_name, waybill_number FROM shopify_shipments
+                     WHERE shop_domain = ? AND waybill_number IS NOT NULL AND shop_order_name IN (${placeholders})`,
+                    [shop, ...orderNames]
+                );
+                syncedRows.forEach(r => {
+                    if (!waybillMap[r.shop_order_name]) {
+                        waybillMap[r.shop_order_name] = r.waybill_number;
+                    }
+                });
             }
         }
     } catch (err) {
