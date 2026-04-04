@@ -1561,30 +1561,25 @@ app.get("/app", requireSessionToken, async (req, res) => {
             }
 
             const clientIdForJoin = shopData.pathxpress_client_id || 1;
+            // Query orders directly from portal table — shows real PathXpress shipments with waybills
             const [rows] = await db.execute(`
                 SELECT
-                    s.shop_order_name,
-                    s.items_description,
-                    o.id, o.waybillNumber, o.customerName, o.customerPhone,
+                    o.id, o.orderNumber, o.waybillNumber, o.customerName, o.customerPhone,
                     o.address, o.city, o.emirate, o.destinationCountry,
                     o.shipperName, o.shipperAddress, o.shipperCity, o.shipperCountry, o.shipperPhone,
                     o.pieces, o.weight, o.length, o.width, o.height,
                     o.serviceType, o.status, o.createdAt,
                     o.codRequired, o.codAmount, o.codCurrency,
                     o.isReturn, o.orderType
-                FROM shopify_shipments s
-                LEFT JOIN orders o ON (o.orderNumber = s.shop_order_name AND o.clientId = ?)
-                WHERE s.shop_domain = ?
-                ORDER BY s.id DESC
+                FROM orders o
+                WHERE o.clientId = ?
+                ORDER BY o.createdAt DESC
                 LIMIT 50
-            `, [clientIdForJoin, shop]);
+            `, [clientIdForJoin]);
 
             if (rows.length > 0) {
                 shipmentsRows = rows.map(row => {
-                    // row.id is NULL when orders table has no matching record (legacy syncs before orderNumber fix)
-                    const hasPortalRecord = row.id != null;
-
-                    const shipmentData = hasPortalRecord ? JSON.stringify({
+                    const shipmentData = JSON.stringify({
                         waybillNumber: row.waybillNumber,
                         shipperName: row.shipperName,
                         shipperAddress: row.shipperAddress,
@@ -1608,8 +1603,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         codRequired: row.codRequired,
                         codAmount: row.codAmount,
                         codCurrency: row.codCurrency,
-                        itemsDescription: row.items_description
-                    }).replace(/"/g, '&quot;') : null;
+                        itemsDescription: row.orderNumber
+                    }).replace(/"/g, '&quot;');
 
                     // Determine type badge
                     let typeLabel, typeBadgeStyle, typeKey;
@@ -1627,17 +1622,15 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         typeKey = 'shipment';
                     }
 
-                    // Status badge color — fall back gracefully when o.* fields are NULL (legacy syncs)
-                    const rowStatus = row.status || (hasPortalRecord ? 'UNKNOWN' : 'SYNCED');
+                    // Status badge color
+                    const rowStatus = row.status || 'UNKNOWN';
                     let statusStyle;
-                    if (rowStatus === 'DELIVERED') {
+                    if (rowStatus === 'DELIVERED' || rowStatus === 'delivered') {
                         statusStyle = 'background:rgba(34,197,94,0.2);color:#22c55e;border:1px solid rgba(34,197,94,0.3);';
-                    } else if (rowStatus === 'PENDING_PICKUP') {
+                    } else if (rowStatus === 'PENDING_PICKUP' || rowStatus === 'pending_pickup') {
                         statusStyle = 'background:rgba(245,158,11,0.2);color:#f59e0b;border:1px solid rgba(245,158,11,0.3);';
-                    } else if (['CANCELLED', 'RETURNED'].includes(rowStatus)) {
+                    } else if (['CANCELLED', 'RETURNED', 'cancelled', 'returned'].includes(rowStatus)) {
                         statusStyle = 'background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);';
-                    } else if (rowStatus === 'SYNCED') {
-                        statusStyle = 'background:rgba(34,197,94,0.15);color:#22c55e;border:1px solid rgba(34,197,94,0.3);';
                     } else {
                         statusStyle = 'background:rgba(45,108,246,0.2);color:#2D6CF6;border:1px solid rgba(45,108,246,0.3);';
                     }
@@ -1647,32 +1640,26 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         ? `<span style="color:#f59e0b;font-weight:600;">${parseFloat(row.codAmount).toFixed(0)} ${row.codCurrency || 'AED'}</span>`
                         : '<span style="color:var(--text-muted);">---</span>';
 
-                    const deleteBtn = hasPortalRecord && row.status === 'PENDING_PICKUP'
-                        ? `<button class="delete-btn" onclick="deleteOrder(${row.id}, '${row.shop_order_name}')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
+                    const deleteBtn = row.status === 'PENDING_PICKUP' || row.status === 'pending_pickup'
+                        ? `<button class="delete-btn" onclick="deleteOrder(${row.id}, '${row.orderNumber || ''}')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>`
                         : '';
 
-                    const editShipperBtn = hasPortalRecord && row.status === 'PENDING_PICKUP'
+                    const editShipperBtn = row.status === 'PENDING_PICKUP' || row.status === 'pending_pickup'
                         ? `<button class="edit-shipper-btn" onclick="openShipperModal(${row.id})" title="Change origin address" style="background:rgba(45,108,246,0.15);border:1px solid rgba(45,108,246,0.3);color:#2D6CF6;padding:6px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></button>`
                         : '';
 
-                    const createdAtDisplay = row.createdAt
-                        ? new Date(row.createdAt).toLocaleDateString()
-                        : '---';
-
                     return `
-                    <tr id="order-row-${row.id || row.shop_order_name}" data-type="${typeKey}">
-                        <td><strong style="color: var(--text-primary);">${row.shop_order_name}</strong></td>
+                    <tr id="order-row-${row.id}" data-type="${typeKey}">
+                        <td><strong style="color: var(--text-primary);">${row.orderNumber || '—'}</strong></td>
                         <td><span style="color: var(--blue-electric); font-weight: 600;">${row.waybillNumber || '---'}</span></td>
                         <td><span class="badge" style="${typeBadgeStyle}">${typeLabel}</span></td>
                         <td><span class="badge" style="${statusStyle}">${rowStatus}</span></td>
                         <td>${codDisplay}</td>
-                        <td>${createdAtDisplay}</td>
+                        <td>${new Date(row.createdAt).toLocaleDateString()}</td>
                         <td style="display: flex; gap: 8px; align-items: center;">
-                            ${hasPortalRecord && row.waybillNumber
+                            ${row.waybillNumber
                             ? `<button class="print-btn" onclick='generateWaybillPDF(${shipmentData})'><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;vertical-align:middle;"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>Print Label</button>`
-                            : !hasPortalRecord
-                                ? '<span style="color:var(--text-muted);font-size:12px;">Legacy sync</span>'
-                                : '<span style="color: var(--text-muted);">Pending</span>'
+                            : '<span style="color: var(--text-muted);">Pending</span>'
                         }
                             ${editShipperBtn}
                             ${deleteBtn}
@@ -4241,18 +4228,6 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
                     [clientId, ...orderNames]
                 );
                 portalRows.forEach(r => { waybillMap[r.orderNumber] = r.waybillNumber; });
-
-                // Secondary: check shopify_shipments for orders that exist but have null orderNumber
-                // (orders synced before the orderNumber fix was applied)
-                const [syncedRows] = await db.execute(
-                    `SELECT shop_order_name FROM shopify_shipments WHERE shop_domain = ? AND shop_order_name IN (${placeholders})`,
-                    [shop, ...orderNames]
-                );
-                syncedRows.forEach(r => {
-                    if (!waybillMap[r.shop_order_name]) {
-                        waybillMap[r.shop_order_name] = "synced"; // exists but waybill unknown
-                    }
-                });
             }
         }
     } catch (err) {
