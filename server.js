@@ -1544,6 +1544,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
 
         // 2. Obtener métricas y envíos
         try {
+            const clientIdForMetrics = shopData.pathxpress_client_id || 1;
             const [metricRows] = await db.execute(`
                 SELECT 
                     COUNT(CASE WHEN DATE(o.createdAt) = CURDATE() THEN 1 END) as todayCount,
@@ -1554,10 +1555,9 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         THEN o.codAmount 
                         ELSE 0 
                     END) as pendingCod
-                FROM shopify_shipments s
-                JOIN orders o ON (o.orderNumber = s.shop_order_name) 
-                WHERE s.shop_domain = ?
-            `, [shop]);
+                FROM orders o
+                WHERE o.clientId = ?
+            `, [clientIdForMetrics]);
 
             if (metricRows.length > 0) {
                 metrics = metricRows[0];
