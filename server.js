@@ -5617,7 +5617,13 @@ async function syncShipmentsToShopify() {
                 o.status AS current_status
             FROM shopify_shipments s
             JOIN shopify_shops ss ON ss.shop_domain = s.shop_domain
-            JOIN orders o ON (o.orderNumber = s.shop_order_name AND o.clientId = ss.pathxpress_client_id)
+            JOIN orders o ON (
+                o.clientId = ss.pathxpress_client_id
+                AND (
+                    (o.orderNumber IS NOT NULL AND o.orderNumber = s.shop_order_name)
+                    OR (s.waybill_number IS NOT NULL AND o.waybillNumber = s.waybill_number)
+                )
+            )
             WHERE s.shopify_fulfillment_id IS NULL
               AND LOWER(o.status) IN ('picked_up', 'in_transit', 'out_for_delivery', 'delivered')
             LIMIT 10
@@ -5780,7 +5786,13 @@ async function syncFulfillmentEvents() {
                 o.status AS current_status
             FROM shopify_shipments s
             JOIN shopify_shops ss ON ss.shop_domain = s.shop_domain
-            JOIN orders o ON (o.orderNumber = s.shop_order_name AND o.clientId = ss.pathxpress_client_id)
+            JOIN orders o ON (
+                o.clientId = ss.pathxpress_client_id
+                AND (
+                    (o.orderNumber IS NOT NULL AND o.orderNumber = s.shop_order_name)
+                    OR (s.waybill_number IS NOT NULL AND o.waybillNumber = s.waybill_number)
+                )
+            )
             WHERE s.shopify_fulfillment_id IS NOT NULL
               AND s.shopify_fulfillment_id != 'ALREADY_FULFILLED'
               AND LOWER(o.status) IN ('in_transit', 'out_for_delivery', 'delivered', 'failed_delivery', 'returned')
@@ -5792,14 +5804,21 @@ async function syncFulfillmentEvents() {
             // Debug: check if any shipments exist for this order but are being filtered
             // This is temporary debug to see what's in the DB
             const [debugRows] = await db.execute(`
-                SELECT s.shop_order_name, s.shopify_fulfillment_id, s.last_synced_status, o.status 
+                SELECT s.shop_order_name, s.shopify_fulfillment_id, s.last_synced_status, o.status, o.orderNumber, s.waybill_number 
                 FROM shopify_shipments s 
-                JOIN orders o ON o.orderNumber = s.shop_order_name 
-                WHERE o.status IN ('in_transit', 'out_for_delivery') 
-                LIMIT 1
+                JOIN shopify_shops ss ON ss.shop_domain = s.shop_domain
+                JOIN orders o ON (
+                    o.clientId = ss.pathxpress_client_id
+                    AND (
+                        (o.orderNumber IS NOT NULL AND o.orderNumber = s.shop_order_name)
+                        OR (s.waybill_number IS NOT NULL AND o.waybillNumber = s.waybill_number)
+                    )
+                )
+                WHERE LOWER(o.status) IN ('picked_up', 'in_transit', 'out_for_delivery', 'delivered', 'failed_delivery', 'returned') 
+                LIMIT 5
              `);
             if (debugRows.length > 0) {
-                console.log("⚠️ Debug: Found potential candidates but query filtered them:", debugRows[0]);
+                console.log("⚠️ Debug: Found potential candidates but main query filtered them:", JSON.stringify(debugRows));
             }
             return;
         }
