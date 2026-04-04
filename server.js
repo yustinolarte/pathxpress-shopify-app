@@ -720,35 +720,24 @@ app.post(
 
             // --- FILTRADO DE ÓRDENES ---
             if (shopData) {
-                const autoSync = shopData.auto_sync !== 0;
-                const requiredTag = shopData.sync_tag;
-                const orderTags = (order.tags || "").split(",").map(t => t.trim());
+                // Usar sync_mode si existe, de lo contrario derivar del campo legacy auto_sync
+                const syncMode = shopData.sync_mode || (shopData.auto_sync !== 0 ? 'auto' : 'tag');
 
-                // Caso A: AutoSync desactivado y NO tiene el tag requerido
-                if (!autoSync && requiredTag && !orderTags.includes(requiredTag)) {
-                    console.log(`🚫 Order ${order.name} ignored: AutoSync OFF and missing tag '${requiredTag}'`);
+                if (syncMode === 'manual') {
+                    // Modo manual: el merchant selecciona las órdenes desde /app/orders
+                    console.log(`📋 Order ${order.name} skipped: shop is in manual sync mode`);
                     return res.sendStatus(200);
                 }
 
-                // Caso B: AutoSync activado, pero hay un tag requerido EXCLUYENTE? 
-                // Normalmente si pones un tag, es para filtrar.
-                // Lógica: Si hay tag definido, DEBE tenerlo, salvo que AutoSync sea "Todo" y el tag sea opcional.
-                // Interpretación común:
-                // - Checkbox ON: Sincroniza todo (ignora tag field salvo que quieras lógica compleja).
-                // - Checkbox OFF: Solo sincroniza si tiene el tag.
-                // Vamos a usar esa lógica simple:
-
-                if (!autoSync) {
-                    // Si no es auto, DEBE tener el tag
+                if (syncMode === 'tag') {
+                    const requiredTag = shopData.sync_tag;
+                    const orderTags = (order.tags || "").split(",").map(t => t.trim());
                     if (!requiredTag || !orderTags.includes(requiredTag)) {
-                        console.log(`🚫 Order ${order.name} ignored: Requires tag '${requiredTag}'`);
+                        console.log(`🚫 Order ${order.name} ignored: missing required tag '${requiredTag}'`);
                         return res.sendStatus(200);
                     }
-                } else {
-                    // Si es auto, sincroniza todo. 
-                    // (Opcional: Podrías querer que "Auto" signifique "Todo", o "Todo lo que coincida con Tag si existe")
-                    // Dejémoslo como: Auto = Todo.
                 }
+                // syncMode === 'auto': sincroniza todas las órdenes (no filtra)
             }
             // ---------------------------
 
@@ -1432,6 +1421,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
     let currentAutoSync = true;
     let currentAutoReturns = true;
     let currentSyncTag = "";
+    let currentSyncMode = "auto"; // 'auto' | 'tag' | 'manual'
     let currentServiceType = "DOM"; // Default service type
     let freeShippingDOM = ""; // Umbral para envío gratis Standard
     let freeShippingExpress = ""; // Umbral para envío gratis Express
@@ -1448,6 +1438,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
             currentAutoReturns = shopData.auto_returns !== 0; // Default true if column is NULL
             currentServiceType = shopData.default_service_type || "DOM";
             currentSyncTag = shopData.sync_tag || "";
+            currentSyncMode = shopData.sync_mode || (currentAutoSync ? 'auto' : (currentSyncTag ? 'tag' : 'manual'));
             freeShippingDOM = shopData.free_shipping_threshold_dom || "";
             freeShippingExpress = shopData.free_shipping_threshold_express || "";
         }
@@ -2169,6 +2160,87 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 letter-spacing: 0.5px;
                 box-shadow: 0 2px 10px rgba(45, 108, 246, 0.3);
             }
+
+            /* App Navigation */
+            .app-nav {
+                display: flex;
+                gap: 4px;
+                margin-bottom: 24px;
+                background: rgba(255,255,255,0.04);
+                border: 1px solid var(--border-color);
+                border-radius: 12px;
+                padding: 6px;
+            }
+            .app-nav a {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                padding: 9px 18px;
+                border-radius: 8px;
+                text-decoration: none;
+                font-size: 14px;
+                font-weight: 500;
+                color: var(--text-muted);
+                transition: all 0.2s ease;
+                white-space: nowrap;
+            }
+            .app-nav a:hover {
+                background: rgba(45,108,246,0.12);
+                color: var(--text-primary);
+            }
+            .app-nav a.active {
+                background: linear-gradient(135deg, var(--blue-electric), #1e5ad4);
+                color: #fff;
+                box-shadow: 0 2px 10px rgba(45,108,246,0.3);
+            }
+            .app-nav a svg {
+                width: 16px;
+                height: 16px;
+                flex-shrink: 0;
+            }
+
+            /* Sync mode radio cards */
+            .sync-mode-options {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .sync-mode-option {
+                display: flex;
+                align-items: flex-start;
+                gap: 12px;
+                padding: 14px 16px;
+                border: 1px solid var(--border-color);
+                border-radius: 10px;
+                cursor: pointer;
+                transition: all 0.2s;
+                background: rgba(255,255,255,0.02);
+            }
+            .sync-mode-option:hover {
+                border-color: rgba(45,108,246,0.4);
+                background: rgba(45,108,246,0.06);
+            }
+            .sync-mode-option input[type="radio"] {
+                width: 18px;
+                height: 18px;
+                margin-top: 2px;
+                accent-color: var(--blue-electric);
+                flex-shrink: 0;
+            }
+            .sync-mode-option.selected {
+                border-color: var(--blue-electric);
+                background: rgba(45,108,246,0.1);
+            }
+            .sync-mode-label strong {
+                display: block;
+                font-size: 14px;
+                color: var(--text-primary);
+                margin-bottom: 2px;
+            }
+            .sync-mode-label span {
+                font-size: 12px;
+                color: var(--text-muted);
+            }
         </style>
         <script>
             // City code mapping for UAE cities
@@ -2502,6 +2574,22 @@ app.get("/app", requireSessionToken, async (req, res) => {
         </script>
       </head>
       <body>
+        <!-- App Navigation -->
+        <nav class="app-nav">
+            <a href="/app?shop=${shop}" class="active">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                Dashboard
+            </a>
+            <a href="/app/orders?shop=${shop}">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/><polyline points="16.5 9.4 7.55 4.24"/><line x1="3.29" y1="7" x2="12" y2="12"/><line x1="12" y1="22" x2="12" y2="12"/><circle cx="18.5" cy="15.5" r="2.5"/><path d="M20.27 17.27 22 19"/></svg>
+                Órdenes
+            </a>
+            <a href="/app/settings?shop=${shop}">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                Configuración
+            </a>
+        </nav>
+
         <div class="card">
 
             <div class="header-logo">
@@ -2694,20 +2782,49 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         }
                     </script>
 
-                    <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="filter" class="icon icon-sm"></i>Sync Filters</h3>
-                    <div class="settings-section">
-                        <div class="checkbox-wrapper">
-                            <input type="checkbox" name="auto_sync" value="1" ${currentAutoSync ? 'checked' : ''} />
-                            <label style="margin-bottom:0;">Automatically sync all orders</label>
-                        </div>
-                        <p class="helper-text">
-                            If disabled, only orders with the specified Tag below will be synced.
-                        </p>
-
-                        <label for="sync_tag" style="margin-top:16px;">Required Tag (Optional):</label>
-                        <input type="text" id="sync_tag" name="sync_tag" placeholder="e.g., send_pathxpress" value="${currentSyncTag}" />
-                        <p class="helper-text" style="margin-left:0;">If you enter a tag (e.g., "send_pathxpress"), ONLY orders with that tag in Shopify will be synced.</p>
+                    <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="filter" class="icon icon-sm"></i>Modo de Sincronización</h3>
+                    <div class="settings-section sync-mode-options" id="syncModeOptions">
+                        <label class="sync-mode-option${currentSyncMode === 'auto' ? ' selected' : ''}" onclick="setSyncMode('auto')">
+                            <input type="radio" name="sync_mode" value="auto" ${currentSyncMode === 'auto' ? 'checked' : ''} />
+                            <div class="sync-mode-label">
+                                <strong>⚡ Automático</strong>
+                                <span>Todas las órdenes nuevas se envían a PathXpress automáticamente al crearse en Shopify.</span>
+                            </div>
+                        </label>
+                        <label class="sync-mode-option${currentSyncMode === 'tag' ? ' selected' : ''}" onclick="setSyncMode('tag')">
+                            <input type="radio" name="sync_mode" value="tag" ${currentSyncMode === 'tag' ? 'checked' : ''} />
+                            <div class="sync-mode-label">
+                                <strong>🏷️ Por Tag</strong>
+                                <span>Solo las órdenes que tengan el tag específico de Shopify se sincronizan automáticamente.</span>
+                            </div>
+                        </label>
+                        <label class="sync-mode-option${currentSyncMode === 'manual' ? ' selected' : ''}" onclick="setSyncMode('manual')">
+                            <input type="radio" name="sync_mode" value="manual" ${currentSyncMode === 'manual' ? 'checked' : ''} />
+                            <div class="sync-mode-label">
+                                <strong>✋ Manual</strong>
+                                <span>Las órdenes aparecen en la lista de Órdenes. Tú decides cuáles enviar a PathXpress.</span>
+                            </div>
+                        </label>
                     </div>
+
+                    <div id="tagFieldWrapper" style="${currentSyncMode === 'tag' ? '' : 'display:none;'} margin-top:12px;">
+                        <label for="sync_tag">Tag requerido:</label>
+                        <input type="text" id="sync_tag" name="sync_tag" placeholder="ej: send_pathxpress" value="${currentSyncTag}" />
+                        <p class="helper-text" style="margin-left:0;">Solo las órdenes con este tag en Shopify se sincronizarán automáticamente.</p>
+                    </div>
+                    <script>
+                        function setSyncMode(mode) {
+                            document.querySelectorAll('.sync-mode-option').forEach(function(el) {
+                                el.classList.remove('selected');
+                            });
+                            var selected = document.querySelector('.sync-mode-option input[value="' + mode + '"]');
+                            if (selected) {
+                                selected.checked = true;
+                                selected.closest('.sync-mode-option').classList.add('selected');
+                            }
+                            document.getElementById('tagFieldWrapper').style.display = (mode === 'tag') ? '' : 'none';
+                        }
+                    </script>
 
                     <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="refresh-ccw" class="icon icon-sm"></i>Returns &amp; Exchanges</h3>
                     <div class="settings-section">
@@ -2785,9 +2902,19 @@ app.get("/app", requireSessionToken, async (req, res) => {
               </div>
 
               <div class="card">
+                ${currentSyncMode === 'manual' ? `
+                <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(0,128,96,0.12);border:1px solid rgba(0,199,122,0.25);border-radius:10px;margin-bottom:16px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#00c77a" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                    <div style="flex:1;">
+                        <strong style="color:#00c77a;font-size:14px;">Modo Manual activo</strong>
+                        <p style="font-size:12px;color:#8A8F98;margin:2px 0 0;">Las órdenes nuevas no se sincronizan automáticamente. Ve a <strong>Gestionar Órdenes</strong> para seleccionar cuáles enviar a PathXpress.</p>
+                    </div>
+                    <a href="/app/orders?shop=${shop}" style="background:#00c77a;color:#fff;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;white-space:nowrap;">Ver Órdenes →</a>
+                </div>
+                ` : ''}
                 <h2 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
                   <span><i data-lucide="package" class="icon"></i>My PathXpress Shipments</span>
-                  <a href="/shopify/orders-test?shop=${shop}" target="_blank" style="font-size:13px;font-weight:500;padding:8px 16px;background:#1a73e8;color:#fff;border-radius:8px;text-decoration:none;white-space:nowrap;">⚡ Order Management</a>
+                  <a href="/app/orders?shop=${shop}" style="font-size:13px;font-weight:500;padding:8px 16px;background:#1a73e8;color:#fff;border-radius:8px;text-decoration:none;white-space:nowrap;">📦 Gestionar Órdenes</a>
                 </h2>
 
                 <!-- Filter tabs + search -->
@@ -3141,13 +3268,17 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
         return res.status(401).json({ success: false, message: "Unauthorized: Missing shop or valid session." });
     }
 
-    const { clientId, default_service_type, auto_sync, sync_tag, free_shipping_dom, free_shipping_express, auto_returns } = req.body;
+    const { clientId, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_dom, free_shipping_express, auto_returns } = req.body;
 
     if (!clientId) {
         return res.status(400).json({ success: false, message: "Error: Missing Client ID." });
     }
 
-    const isAutoSync = auto_sync === "1" || auto_sync === true ? 1 : 0;
+    // Derivar sync_mode (nuevo) y auto_sync legacy (compatibilidad)
+    const validSyncModes = ['auto', 'tag', 'manual'];
+    const resolvedSyncMode = validSyncModes.includes(sync_mode) ? sync_mode : 'auto';
+    // Mantener auto_sync legacy sincronizado para compatibilidad con código anterior
+    const isAutoSync = resolvedSyncMode === 'auto' ? 1 : 0;
     const isAutoReturns = auto_returns === "1" || auto_returns === true ? 1 : 0;
     const serviceType = default_service_type || "DOM";
     const freeShippingDOMValue = free_shipping_dom && parseFloat(free_shipping_dom) > 0
@@ -3160,19 +3291,20 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     try {
         // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, free_shipping_threshold_dom, free_shipping_threshold_express)
-             VALUES(?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_threshold_dom, free_shipping_threshold_express)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 pathxpress_client_id = VALUES(pathxpress_client_id),
                 default_service_type = VALUES(default_service_type),
                 auto_sync = VALUES(auto_sync),
                 sync_tag = VALUES(sync_tag),
+                sync_mode = VALUES(sync_mode),
                 free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
                 free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
                 updated_at = CURRENT_TIMESTAMP`,
-            [shop, clientId, serviceType, isAutoSync, sync_tag || null, freeShippingDOMValue, freeShippingExpressValue]
+            [shop, clientId, serviceType, isAutoSync, sync_tag || null, resolvedSyncMode, freeShippingDOMValue, freeShippingExpressValue]
         );
-        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, AutoSync = ${isAutoSync}, AutoReturns = ${isAutoReturns}`);
+        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, SyncMode = ${resolvedSyncMode}, AutoReturns = ${isAutoReturns}`);
 
         // Return JSON success
         res.json({ success: true, message: "Settings saved successfully" });
@@ -3180,6 +3312,257 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
         console.error("Error saving settings:", err);
         res.status(500).json({ success: false, message: "Internal server error saving settings." });
     }
+});
+
+// ======================
+// 4.1.2) /app/settings — Página de configuración separada
+// ======================
+app.get("/app/settings", requireSessionToken, async (req, res) => {
+    const shop = req.shopifySession?.shop || req.query.shop || req.headers["x-shopify-shop-domain"] || "";
+    if (!shop) return res.status(400).send("Could not detect the shop.");
+
+    const shopData = await getShopFromDB(shop);
+    if (!shopData || !shopData.access_token) {
+        return res.redirect(`/app?shop=${encodeURIComponent(shop)}`);
+    }
+
+    const currentClientId = shopData.pathxpress_client_id || "";
+    const currentSyncMode = shopData.sync_mode || (shopData.auto_sync !== 0 ? 'auto' : (shopData.sync_tag ? 'tag' : 'manual'));
+    const currentSyncTag = shopData.sync_tag || "";
+    const currentServiceType = shopData.default_service_type || "DOM";
+    const freeShippingDOM = shopData.free_shipping_threshold_dom || "";
+    const freeShippingExpress = shopData.free_shipping_threshold_express || "";
+    const currentAutoReturns = shopData.auto_returns !== 0;
+
+    const escHtml = s => String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuración – PathXpress</title>
+    <meta name="shopify-api-key" content="${process.env.SHOPIFY_API_KEY}" />
+    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+    <style>
+        :root { --bg: #0A1128; --card-bg: #0F1A3B; --blue: #2D6CF6; --text: #FFFFFF; --muted: #8A8F98; --border: rgba(255,255,255,0.1); }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: linear-gradient(135deg, var(--bg), var(--card-bg)); color: var(--text); min-height: 100vh; padding: 20px; }
+        .app-nav { display: flex; gap: 4px; margin-bottom: 24px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 12px; padding: 6px; }
+        .app-nav a { display: flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500; color: var(--muted); transition: all 0.2s; }
+        .app-nav a:hover { background: rgba(45,108,246,0.12); color: var(--text); }
+        .app-nav a.active { background: linear-gradient(135deg, var(--blue), #1e5ad4); color: #fff; box-shadow: 0 2px 10px rgba(45,108,246,0.3); }
+        .app-nav a svg { width: 16px; height: 16px; flex-shrink: 0; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+        .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
+        .card { background: rgba(15,26,59,0.6); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .section-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; }
+        input[type="text"], input[type="number"], select { width: 100%; padding: 11px 14px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.05); color: var(--text); font-size: 14px; margin-bottom: 4px; }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(45,108,246,0.2); }
+        input::placeholder { color: var(--muted); }
+        .helper { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+        .sync-mode-options { display: flex; flex-direction: column; gap: 10px; }
+        .sync-mode-option { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: all 0.2s; background: rgba(255,255,255,0.02); }
+        .sync-mode-option:hover { border-color: rgba(45,108,246,0.4); background: rgba(45,108,246,0.06); }
+        .sync-mode-option input[type="radio"] { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--blue); flex-shrink: 0; }
+        .sync-mode-option.selected { border-color: var(--blue); background: rgba(45,108,246,0.1); }
+        .sync-mode-label strong { display: block; font-size: 14px; margin-bottom: 2px; }
+        .sync-mode-label span { font-size: 12px; color: var(--muted); }
+        .checkbox-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; }
+        .checkbox-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--blue); flex-shrink: 0; }
+        .checkbox-row label { margin: 0; font-size: 14px; cursor: pointer; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .btn-save { background: linear-gradient(135deg, var(--blue), #1e5ad4); color: #fff; border: none; padding: 13px 28px; border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer; width: 100%; box-shadow: 0 4px 15px rgba(45,108,246,0.3); transition: all 0.3s; }
+        .btn-save:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(45,108,246,0.4); }
+        .feedback-box { padding: 12px 16px; border-radius: 10px; font-size: 14px; margin-bottom: 16px; display: none; }
+        .feedback-success { background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); color: #22c55e; }
+        .feedback-error { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; }
+        select option { background: #0F1A3B; }
+        @media (max-width: 600px) { body { padding: 12px; } .grid-2 { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <nav class="app-nav">
+        <a href="/app?shop=${escHtml(shop)}">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Dashboard
+        </a>
+        <a href="/app/orders?shop=${escHtml(shop)}">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/><polyline points="16.5 9.4 7.55 4.24"/><line x1="3.29" y1="7" x2="12" y2="12"/><line x1="12" y1="22" x2="12" y2="12"/><circle cx="18.5" cy="15.5" r="2.5"/><path d="M20.27 17.27 22 19"/></svg>
+            Órdenes
+        </a>
+        <a href="/app/settings?shop=${escHtml(shop)}" class="active">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Configuración
+        </a>
+    </nav>
+
+    <h1>Configuración</h1>
+    <p class="subtitle">Ajusta cómo PathXpress integra con tu tienda Shopify</p>
+
+    <div id="feedbackBox" class="feedback-box"></div>
+
+    <form id="settingsForm">
+        <!-- CONEXIÓN -->
+        <div class="card">
+            <div class="section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                Conexión PathXpress
+            </div>
+            <label for="clientIdInput">Client ID</label>
+            <input type="number" id="clientIdInput" name="clientId" placeholder="Tu ID de cliente PathXpress" value="${escHtml(currentClientId)}" required min="1" />
+            <p class="helper">Tu ID de cliente en el portal PathXpress. Contacta a soporte si no lo conoces.</p>
+        </div>
+
+        <!-- MODO DE SINCRONIZACIÓN -->
+        <div class="card">
+            <div class="section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Modo de Sincronización de Órdenes
+            </div>
+            <div class="sync-mode-options">
+                <label class="sync-mode-option${currentSyncMode === 'auto' ? ' selected' : ''}" onclick="setSyncMode('auto')">
+                    <input type="radio" name="sync_mode" value="auto" ${currentSyncMode === 'auto' ? 'checked' : ''} />
+                    <div class="sync-mode-label">
+                        <strong>⚡ Automático</strong>
+                        <span>Todas las órdenes nuevas se envían a PathXpress al crearse en Shopify.</span>
+                    </div>
+                </label>
+                <label class="sync-mode-option${currentSyncMode === 'tag' ? ' selected' : ''}" onclick="setSyncMode('tag')">
+                    <input type="radio" name="sync_mode" value="tag" ${currentSyncMode === 'tag' ? 'checked' : ''} />
+                    <div class="sync-mode-label">
+                        <strong>🏷️ Por Tag</strong>
+                        <span>Solo órdenes con el tag específico se sincronizan automáticamente.</span>
+                    </div>
+                </label>
+                <label class="sync-mode-option${currentSyncMode === 'manual' ? ' selected' : ''}" onclick="setSyncMode('manual')">
+                    <input type="radio" name="sync_mode" value="manual" ${currentSyncMode === 'manual' ? 'checked' : ''} />
+                    <div class="sync-mode-label">
+                        <strong>✋ Manual</strong>
+                        <span>Las órdenes aparecen en la lista. Tú decides cuáles enviar a PathXpress desde la página Órdenes.</span>
+                    </div>
+                </label>
+            </div>
+            <div id="tagFieldWrapper" style="${currentSyncMode === 'tag' ? '' : 'display:none;'} margin-top:14px;">
+                <label for="sync_tag">Tag requerido en Shopify:</label>
+                <input type="text" id="sync_tag" name="sync_tag" placeholder="ej: send_pathxpress" value="${escHtml(currentSyncTag)}" />
+                <p class="helper">Solo las órdenes con este tag se sincronizarán automáticamente al crearse.</p>
+            </div>
+        </div>
+
+        <!-- SERVICIO DE ENVÍO -->
+        <div class="card">
+            <div class="section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                Servicio de Envío por Defecto
+            </div>
+            <select name="default_service_type" id="default_service_type">
+                <option value="DOM" ${currentServiceType === 'DOM' ? 'selected' : ''}>DOM — Estándar (1-2 días)</option>
+                <option value="SAMEDAY" ${currentServiceType === 'SAMEDAY' ? 'selected' : ''}>SAMEDAY — Mismo día</option>
+                <option value="NEXTDAY" ${currentServiceType === 'NEXTDAY' ? 'selected' : ''}>NEXTDAY — Día siguiente</option>
+            </select>
+            <p class="helper">Servicio aplicado por defecto a todas las órdenes de esta tienda.</p>
+        </div>
+
+        <!-- ENVÍO GRATIS -->
+        <div class="card">
+            <div class="section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+                Envío Gratis
+            </div>
+            <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Monto mínimo de pedido para ofrecer envío gratis. Deja vacío para desactivar.</p>
+            <div class="grid-2">
+                <div>
+                    <label>Estándar (DOM):</label>
+                    <input type="number" step="0.01" min="0" name="free_shipping_dom" placeholder="ej: 200" value="${escHtml(String(freeShippingDOM))}" />
+                    <p class="helper">Entrega en 1-2 días</p>
+                </div>
+                <div>
+                    <label>Express (Same Day):</label>
+                    <input type="number" step="0.01" min="0" name="free_shipping_express" placeholder="ej: 500" value="${escHtml(String(freeShippingExpress))}" />
+                    <p class="helper">Entrega el mismo día</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- DEVOLUCIONES -->
+        <div class="card">
+            <div class="section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3"/></svg>
+                Devoluciones y Cambios
+            </div>
+            <div class="checkbox-row">
+                <input type="checkbox" name="auto_returns" value="1" id="auto_returns" ${currentAutoReturns ? 'checked' : ''} />
+                <label for="auto_returns" style="cursor:pointer;">Procesar devoluciones y cambios aprobados automáticamente</label>
+            </div>
+            <p class="helper" style="margin-left:28px;">Cuando está activo, las devoluciones aprobadas en Shopify se envían automáticamente a PathXpress para recogida.</p>
+        </div>
+
+        <button type="submit" class="btn-save">Guardar Configuración</button>
+    </form>
+
+    <script>
+        var SHOP = ${JSON.stringify(shop)};
+
+        function setSyncMode(mode) {
+            document.querySelectorAll('.sync-mode-option').forEach(function(el) { el.classList.remove('selected'); });
+            var selected = document.querySelector('.sync-mode-option input[value="' + mode + '"]');
+            if (selected) {
+                selected.checked = true;
+                selected.closest('.sync-mode-option').classList.add('selected');
+            }
+            document.getElementById('tagFieldWrapper').style.display = (mode === 'tag') ? '' : 'none';
+        }
+
+        async function getToken() {
+            if (typeof getSessionToken === 'function') return getSessionToken();
+            if (window.shopify && window.shopify.id) return window.shopify.id.getSessionToken();
+            return null;
+        }
+
+        document.getElementById('settingsForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            var btn = e.target.querySelector('.btn-save');
+            var fb = document.getElementById('feedbackBox');
+            btn.disabled = true;
+            btn.textContent = 'Guardando...';
+
+            var formData = new FormData(e.target);
+            var data = {};
+            formData.forEach(function(v, k) { data[k] = v; });
+            data.shop = SHOP;
+
+            try {
+                var token = await getToken();
+                var headers = { 'Content-Type': 'application/json' };
+                if (token) headers['Authorization'] = 'Bearer ' + token;
+
+                var resp = await fetch('/app/save-settings', {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(data)
+                });
+                var result = await resp.json();
+
+                fb.className = 'feedback-box ' + (result.success ? 'feedback-success' : 'feedback-error');
+                fb.textContent = result.message || (result.success ? 'Configuración guardada.' : 'Error al guardar.');
+                fb.style.display = 'block';
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch(err) {
+                fb.className = 'feedback-box feedback-error';
+                fb.textContent = 'Error de red: ' + err.message;
+                fb.style.display = 'block';
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Guardar Configuración';
+        });
+    </script>
+</body>
+</html>`);
 });
 
 // ======================
@@ -3370,7 +3753,8 @@ app.post("/api/shipping-rates", async (req, res) => {
 
         // 4. Obtener cliente con todas sus tarifas
         const [clientRows] = await db.execute(
-            `SELECT manualRateTierId, customDomBaseRate, customDomPerKg, customSddBaseRate, customSddPerKg 
+            `SELECT manualRateTierId, customDomBaseRate, customDomPerKg, customSddBaseRate, customSddPerKg,
+                    zone1BaseRate, zone1PerKg, zone2BaseRate, zone2PerKg, zone3BaseRate, zone3PerKg
              FROM clientAccounts WHERE id = ? `,
             [clientId]
         );
@@ -3382,6 +3766,12 @@ app.post("/api/shipping-rates", async (req, res) => {
 
         const client = clientRows[0];
 
+        // Extraer emirato del destino para calcular zona
+        const destination = rate.destination || {};
+        const emirateRaw = destination.province || destination.city || '';
+        const zone = getZoneFromEmirate(emirateRaw);
+        console.log(`📍 Destination: ${emirateRaw} → Zone ${zone}`);
+
         // 5. Calcular peso total
         const items = rate.items || [];
         const totalWeightGrams = items.reduce((sum, item) => sum + (item.grams || 0) * (item.quantity || 1), 0);
@@ -3391,11 +3781,21 @@ app.post("/api/shipping-rates", async (req, res) => {
 
         let domPrice, sddPrice;
 
-        // 6. PRIORIDAD: Usar tarifas personalizadas del cliente si las tiene
-        if (client.customDomBaseRate && client.customDomPerKg) {
+        // 6. PRIORIDAD: Usar tarifas por zona primero, luego planas, luego tiers
+        const hasZoneRates = client.zone1BaseRate || client.zone2BaseRate || client.zone3BaseRate;
+        if (hasZoneRates) {
+            const rawBase = zone === 1 ? client.zone1BaseRate : zone === 2 ? client.zone2BaseRate : client.zone3BaseRate;
+            const rawPerKg = zone === 1 ? client.zone1PerKg : zone === 2 ? client.zone2PerKg : client.zone3PerKg;
+            // Si la zona destino no tiene tarifa configurada, caer a zona 1
+            const effectiveBase = rawBase || client.zone1BaseRate;
+            const effectivePerKg = rawBase ? rawPerKg : client.zone1PerKg;
+            const baseRate = parseFloat(effectiveBase);
+            const perKgRate = effectivePerKg ? parseFloat(effectivePerKg) : 0;
+            domPrice = baseRate + (Math.max(0, totalWeightKg - 5) * perKgRate);
+            console.log(`💰 DOM Zone ${zone} rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${domPrice}`);
+        } else if (client.customDomBaseRate && client.customDomPerKg) {
             const baseRate = parseFloat(client.customDomBaseRate);
             const perKgRate = parseFloat(client.customDomPerKg);
-            // Fórmula: baseRate cubre hasta 5kg, luego +perKgRate por cada kg adicional
             domPrice = baseRate + (Math.max(0, totalWeightKg - 5) * perKgRate);
             console.log(`💰 DOM using custom rates: ${baseRate} + (${Math.max(0, totalWeightKg - 5)} * ${perKgRate}) = ${domPrice} `);
         } else {
@@ -3551,6 +3951,17 @@ function calculateTierPrice(tier, weightKg) {
         const extraKg = weightKg - maxWeight;
         return baseRate + (extraKg * additionalKgRate);
     }
+}
+
+// Helper: Determinar zona según emirato de destino (UAE)
+function getZoneFromEmirate(emirate) {
+    if (!emirate) return 1;
+    const normalized = emirate.toLowerCase().trim();
+    const zone1 = ['dubai', 'sharjah', 'ajman', 'abu dhabi', 'abudhabi'];
+    const zone2 = ['umm al quwain', 'uaq', 'ras al khaimah', 'rak', 'fujairah'];
+    if (zone1.some(z => normalized.includes(z))) return 1;
+    if (zone2.some(z => normalized.includes(z))) return 2;
+    return 3;
 }
 
 // Helper: Tarifas por defecto (fallback)
@@ -3784,7 +4195,407 @@ app.get("/auth/callback", async (req, res) => {
 // 7) GESTIÓN DE ÓRDENES + SYNC MANUAL
 // ======================
 
-// --- Página de gestión de órdenes ---
+// --- /app/orders: Página oficial de gestión y sync manual de órdenes ---
+app.get("/app/orders", requireSessionToken, async (req, res) => {
+    const shop = req.shopifySession?.shop || req.query.shop || req.headers["x-shopify-shop-domain"] || "";
+
+    if (!shop) return res.status(400).send("Could not detect the shop.");
+    if (!/^[a-z0-9-]+\.myshopify\.com$/i.test(shop)) return res.status(400).send("Invalid shop parameter.");
+
+    const shopData = await getShopFromDB(shop);
+    if (!shopData || !shopData.access_token) {
+        return res.redirect(`/app?shop=${encodeURIComponent(shop)}`);
+    }
+
+    const syncMode = shopData.sync_mode || (shopData.auto_sync !== 0 ? 'auto' : (shopData.sync_tag ? 'tag' : 'manual'));
+    const syncModeLabel = syncMode === 'auto' ? '⚡ Automático' : syncMode === 'tag' ? `🏷️ Tag: ${shopData.sync_tag || '—'}` : '✋ Manual';
+
+    const limit = 25;
+    const pageInfo = req.query.page_info || null;
+
+    let orders = [];
+    let nextPageInfo = null;
+    let prevPageInfo = null;
+    let waybillMap = {};
+
+    try {
+        let url = pageInfo
+            ? `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=${limit}&page_info=${encodeURIComponent(pageInfo)}`
+            : `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=${limit}&status=any`;
+
+        const response = await fetch(url, {
+            headers: { "X-Shopify-Access-Token": shopData.access_token }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            orders = data.orders || [];
+
+            const linkHeader = response.headers.get("link") || "";
+            const nextMatch = linkHeader.match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="next"/);
+            const prevMatch = linkHeader.match(/<[^>]+page_info=([^>&"]+)[^>]*>;\s*rel="previous"/);
+            nextPageInfo = nextMatch ? nextMatch[1] : null;
+            prevPageInfo = prevMatch ? prevMatch[1] : null;
+
+            if (orders.length > 0) {
+                const orderNames = orders.map(o => o.name);
+                const placeholders = orderNames.map(() => "?").join(",");
+                const clientId = shopData.pathxpress_client_id || 1;
+                const [rows] = await db.execute(
+                    `SELECT orderNumber, waybillNumber FROM orders WHERE clientId = ? AND orderNumber IN (${placeholders})`,
+                    [clientId, ...orderNames]
+                );
+                rows.forEach(r => { waybillMap[r.orderNumber] = r.waybillNumber; });
+            }
+        }
+    } catch (err) {
+        console.error("Error fetching orders for /app/orders:", err);
+    }
+
+    const escHtml = s => String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+    let rowsHtml = "";
+    for (const order of orders) {
+        const waybill = waybillMap[order.name];
+        const synced = !!waybill;
+        const statusBadge = synced
+            ? `<span class="badge synced">&#10003; ${escHtml(waybill)}</span>`
+            : `<span class="badge pending">Pendiente</span>`;
+        const customerName = order.shipping_address
+            ? `${order.shipping_address.first_name || ""} ${order.shipping_address.last_name || ""}`.trim()
+            : (order.email || "—");
+        const totalPieces = (order.line_items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+        const codAmount = order.payment_gateway && order.payment_gateway.toLowerCase().includes('cash')
+            ? `${order.total_price} ${order.currency}` : "—";
+
+        rowsHtml += `
+        <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}">
+            <td class="cb-col">
+                ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" onchange="cbChanged(this)">`}
+            </td>
+            <td><strong>${escHtml(order.name)}</strong></td>
+            <td>${escHtml(customerName)}</td>
+            <td>${new Date(order.created_at).toLocaleDateString('es-AE')}</td>
+            <td>${escHtml(order.total_price)} ${escHtml(order.currency)}</td>
+            <td>${totalPieces}</td>
+            <td>${statusBadge}</td>
+            <td class="result-col" id="result-${escHtml(order.id)}"></td>
+        </tr>`;
+    }
+
+    const paginationHtml = `
+        <div class="pagination">
+            ${prevPageInfo ? `<a href="/app/orders?shop=${encodeURIComponent(shop)}&page_info=${encodeURIComponent(prevPageInfo)}" class="btn-page">← Anterior</a>` : `<span class="btn-page disabled">← Anterior</span>`}
+            ${nextPageInfo ? `<a href="/app/orders?shop=${encodeURIComponent(shop)}&page_info=${encodeURIComponent(nextPageInfo)}" class="btn-page">Siguiente →</a>` : `<span class="btn-page disabled">Siguiente →</span>`}
+        </div>`;
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Órdenes – PathXpress</title>
+    <meta name="shopify-api-key" content="${process.env.SHOPIFY_API_KEY}" />
+    <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+    <style>
+        :root {
+            --bg: #0A1128; --card-bg: #0F1A3B;
+            --blue: #2D6CF6; --red: #E10600;
+            --text: #FFFFFF; --muted: #8A8F98;
+            --border: rgba(255,255,255,0.1);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: linear-gradient(135deg, var(--bg), var(--card-bg)); color: var(--text); min-height: 100vh; padding: 20px; }
+        .app-nav { display: flex; gap: 4px; margin-bottom: 24px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 12px; padding: 6px; }
+        .app-nav a { display: flex; align-items: center; gap: 7px; padding: 9px 18px; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500; color: var(--muted); transition: all 0.2s; }
+        .app-nav a:hover { background: rgba(45,108,246,0.12); color: var(--text); }
+        .app-nav a.active { background: linear-gradient(135deg, var(--blue), #1e5ad4); color: #fff; box-shadow: 0 2px 10px rgba(45,108,246,0.3); }
+        .app-nav a svg { width: 16px; height: 16px; flex-shrink: 0; }
+        h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+        .subtitle { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+        .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+        .btn-sync { background: #008060; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+        .btn-sync:hover { background: #006b52; }
+        .btn-sync:disabled { background: #555; cursor: not-allowed; }
+        .btn-find { background: var(--blue); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
+        .btn-find:hover { background: #1e5ad4; }
+        .btn-find:disabled { background: #555; cursor: not-allowed; }
+        .search-box { flex: 1; min-width: 180px; max-width: 280px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text); font-size: 13px; }
+        .search-box::placeholder { color: var(--muted); }
+        .card { background: rgba(15,26,59,0.6); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; }
+        thead th { background: rgba(255,255,255,0.04); padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); border-bottom: 1px solid var(--border); }
+        tbody tr { border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.1s; }
+        tbody tr:last-child { border-bottom: none; }
+        tbody tr:hover { background: rgba(255,255,255,0.03); }
+        tbody tr.selected { background: rgba(0,128,96,0.1); }
+        td { padding: 12px 14px; font-size: 13px; vertical-align: middle; color: var(--text); }
+        .cb-col { width: 36px; }
+        input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--blue); cursor: pointer; }
+        .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+        .badge.synced { background: rgba(0,128,96,0.2); color: #00c77a; border: 1px solid rgba(0,199,122,0.3); }
+        .badge.pending { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.25); }
+        .badge.error { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.25); }
+        .badge.syncing { background: rgba(45,108,246,0.15); color: var(--blue); border: 1px solid rgba(45,108,246,0.25); }
+        .pagination { display: flex; gap: 8px; margin-top: 12px; justify-content: flex-end; }
+        .btn-page { padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border); background: rgba(255,255,255,0.05); font-size: 13px; color: var(--text); text-decoration: none; cursor: pointer; }
+        .btn-page.disabled { color: var(--muted); cursor: default; pointer-events: none; }
+        .btn-page:not(.disabled):hover { background: rgba(255,255,255,0.1); }
+        .progress-bar { display: none; height: 3px; background: var(--border); border-radius: 2px; margin-bottom: 12px; overflow: hidden; }
+        .progress-bar .fill { height: 100%; background: #008060; transition: width 0.3s; width: 0%; }
+        .scan-status { font-size: 13px; color: var(--muted); }
+        .section-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 20px 0 8px; }
+        .mode-banner { display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(45,108,246,0.1); border: 1px solid rgba(45,108,246,0.25); border-radius: 10px; font-size: 13px; margin-bottom: 16px; }
+        .mode-banner a { color: var(--blue); font-weight: 500; }
+        @media (max-width: 600px) { body { padding: 12px; } thead th:nth-child(6), td:nth-child(6) { display: none; } }
+    </style>
+</head>
+<body>
+    <nav class="app-nav">
+        <a href="/app?shop=${escHtml(shop)}">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+            Dashboard
+        </a>
+        <a href="/app/orders?shop=${escHtml(shop)}" class="active">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/><polyline points="16.5 9.4 7.55 4.24"/><line x1="3.29" y1="7" x2="12" y2="12"/><line x1="12" y1="22" x2="12" y2="12"/><circle cx="18.5" cy="15.5" r="2.5"/><path d="M20.27 17.27 22 19"/></svg>
+            Órdenes
+        </a>
+        <a href="/app/settings?shop=${escHtml(shop)}">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Configuración
+        </a>
+    </nav>
+
+    <h1>Gestión de Órdenes</h1>
+    <p class="subtitle">Selecciona las órdenes que deseas enviar a PathXpress</p>
+
+    <div class="mode-banner">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Modo de sync: <strong>${escHtml(syncModeLabel)}</strong>
+        &nbsp;·&nbsp; <a href="/app/settings?shop=${escHtml(shop)}">Cambiar</a>
+    </div>
+
+    <div class="toolbar">
+        <button class="btn-sync" id="syncBtn" disabled onclick="syncSelected()">Sincronizar seleccionadas (0)</button>
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" id="selectAll" onchange="toggleAll(this)"> Seleccionar todas pendientes
+        </label>
+        <input type="text" class="search-box" id="searchBox" placeholder="Buscar orden o cliente..." oninput="filterRows(this.value)">
+        <span class="scan-status" id="selectInfo" style="margin-left:auto;"></span>
+    </div>
+    <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+
+    <div class="card">
+        <table id="ordersTable">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Orden</th>
+                    <th>Cliente</th>
+                    <th>Fecha</th>
+                    <th>Total</th>
+                    <th>Pzas</th>
+                    <th>Estado</th>
+                    <th>Resultado</th>
+                </tr>
+            </thead>
+            <tbody id="ordersBody">
+                ${rowsHtml || '<tr><td colspan="8" style="text-align:center;padding:24px;color:#8A8F98;">No se encontraron órdenes.</td></tr>'}
+            </tbody>
+        </table>
+    </div>
+    ${paginationHtml}
+
+    <div class="toolbar" style="margin-top:8px;">
+        <button class="btn-find" id="findUnsyncedBtn" onclick="findUnsynced()">
+            Buscar todas las órdenes sin sincronizar
+        </button>
+        <span class="scan-status" id="scanStatus"></span>
+    </div>
+    <div id="unsyncedSection" style="display:none;margin-top:8px;">
+        <div class="section-title">Órdenes sin sincronizar encontradas</div>
+        <div class="card">
+            <table>
+                <thead>
+                    <tr><th></th><th>Orden</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Pzas</th><th>Estado</th><th>Resultado</th></tr>
+                </thead>
+                <tbody id="unsyncedBody"></tbody>
+            </table>
+        </div>
+        <div id="unsyncedPagination" style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;"></div>
+    </div>
+
+    <script>
+        var SHOP = ${JSON.stringify(shop)};
+
+        function getChecked() {
+            var all = document.querySelectorAll(".order-cb");
+            return Array.from(all).filter(function(cb) { return cb.checked; });
+        }
+
+        function updateSyncButton() {
+            var checked = getChecked();
+            var syncBtn = document.getElementById("syncBtn");
+            if (!syncBtn) return;
+            syncBtn.textContent = "Sincronizar seleccionadas (" + checked.length + ")";
+            syncBtn.disabled = (checked.length === 0);
+            var info = document.getElementById("selectInfo");
+            if (info) info.textContent = checked.length > 0 ? checked.length + " seleccionada(s)" : "";
+        }
+
+        function toggleAll(cb) {
+            document.querySelectorAll(".order-cb").forEach(function(el) {
+                el.checked = cb.checked;
+                var row = el.closest("tr");
+                if (row) row.classList.toggle("selected", cb.checked);
+            });
+            updateSyncButton();
+        }
+
+        function cbChanged(checkbox) {
+            var row = checkbox.closest("tr");
+            if (row) row.classList.toggle("selected", checkbox.checked);
+            var sa = document.getElementById("selectAll");
+            if (sa && !checkbox.checked) sa.checked = false;
+            updateSyncButton();
+        }
+
+        function filterRows(query) {
+            var q = query.toLowerCase();
+            document.querySelectorAll("#ordersBody tr").forEach(function(tr) {
+                var text = tr.textContent.toLowerCase();
+                tr.style.display = text.includes(q) ? "" : "none";
+            });
+        }
+
+        function syncSelected() {
+            var checked = getChecked();
+            if (checked.length === 0) return;
+
+            var orderIds = checked.map(function(cb) { return cb.value; });
+            var syncBtn = document.getElementById("syncBtn");
+            syncBtn.disabled = true;
+            syncBtn.textContent = "Sincronizando...";
+
+            var progressBar = document.getElementById("progressBar");
+            var progressFill = document.getElementById("progressFill");
+            progressBar.style.display = "block";
+            progressFill.style.width = "10%";
+
+            checked.forEach(function(cb) {
+                var cell = document.getElementById("result-" + cb.value);
+                if (cell) cell.innerHTML = '<span class="badge syncing">Sincronizando...</span>';
+            });
+
+            fetch("/shopify/manual-sync", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ shop: SHOP, orderIds: orderIds })
+            })
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                progressFill.style.width = "100%";
+                var results = data.results || [];
+                results.forEach(function(r) {
+                    var resultCell = document.getElementById("result-" + r.orderId);
+                    if (!resultCell) return;
+                    if (r.success) {
+                        resultCell.innerHTML = '<span class="badge synced">&#10003; ' + (r.waybill || "Sincronizado") + '</span>';
+                        var tr = resultCell.closest("tr");
+                        if (tr) {
+                            tr.querySelector("td:nth-child(7)").innerHTML = '<span class="badge synced">&#10003; ' + (r.waybill || "") + '</span>';
+                            var cbCell = tr.querySelector(".cb-col");
+                            if (cbCell) cbCell.innerHTML = "";
+                        }
+                    } else if (r.skipped) {
+                        resultCell.innerHTML = '<span class="badge synced">Ya sincronizado</span>';
+                    } else {
+                        resultCell.innerHTML = '<span class="badge error">Error</span>';
+                    }
+                });
+                setTimeout(function() { progressBar.style.display = "none"; progressFill.style.width = "0%"; }, 800);
+                syncBtn.textContent = "Sincronizar seleccionadas (0)";
+                syncBtn.disabled = true;
+                document.getElementById("selectAll").checked = false;
+            })
+            .catch(function(err) {
+                progressBar.style.display = "none";
+                syncBtn.disabled = false;
+                updateSyncButton();
+                alert("Error al sincronizar: " + err.message);
+            });
+        }
+
+        function renderUnsyncedRow(order) {
+            var date = new Date(order.created_at).toLocaleDateString('es-AE');
+            return '<tr data-order-id="' + order.id + '">'
+                + '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" onchange="cbChanged(this)"></td>'
+                + '<td><strong>' + order.name + '</strong></td>'
+                + '<td>' + (order.customerName || "—") + '</td>'
+                + '<td>' + date + '</td>'
+                + '<td>' + order.total_price + ' ' + order.currency + '</td>'
+                + '<td>—</td>'
+                + '<td><span class="badge pending">Pendiente</span></td>'
+                + '<td class="result-col" id="result-' + order.id + '"></td>'
+                + '</tr>';
+        }
+
+        function findUnsynced(pageInfo) {
+            var findBtn = document.getElementById("findUnsyncedBtn");
+            var scanStatus = document.getElementById("scanStatus");
+            var unsyncedSection = document.getElementById("unsyncedSection");
+            var unsyncedBody = document.getElementById("unsyncedBody");
+            var paginationDiv = document.getElementById("unsyncedPagination");
+
+            findBtn.disabled = true;
+            scanStatus.textContent = "Buscando órdenes sin sincronizar...";
+
+            var url = "/shopify/unsynced-orders?shop=" + encodeURIComponent(SHOP);
+            if (pageInfo) url += "&page_info=" + encodeURIComponent(pageInfo);
+
+            fetch(url)
+            .then(function(resp) {
+                if (!resp.ok) throw new Error("Error del servidor " + resp.status);
+                return resp.json();
+            })
+            .then(function(data) {
+                var orders = data.orders || [];
+                if (!pageInfo) unsyncedBody.innerHTML = "";
+                if (orders.length === 0 && !pageInfo) {
+                    scanStatus.textContent = "¡Todas las órdenes ya están sincronizadas!";
+                } else {
+                    orders.forEach(function(o) {
+                        unsyncedBody.insertAdjacentHTML("beforeend", renderUnsyncedRow(o));
+                    });
+                    var total = unsyncedBody.querySelectorAll(".order-cb").length;
+                    scanStatus.textContent = "Encontradas: " + total + " orden" + (total !== 1 ? "es" : "") + (data.hasMore ? " (hay más disponibles)" : "");
+                    unsyncedSection.style.display = "block";
+                }
+                paginationDiv.innerHTML = "";
+                if (data.hasMore && data.nextPageInfo) {
+                    var loadBtn = document.createElement("button");
+                    loadBtn.className = "btn-find";
+                    loadBtn.textContent = "Cargar más";
+                    loadBtn.setAttribute("data-cursor", encodeURIComponent(data.nextPageInfo));
+                    loadBtn.onclick = function() { findUnsynced(this.getAttribute("data-cursor")); };
+                    paginationDiv.appendChild(loadBtn);
+                }
+                updateSyncButton();
+                findBtn.disabled = false;
+            })
+            .catch(function(err) {
+                scanStatus.textContent = "Error: " + err.message;
+                findBtn.disabled = false;
+            });
+        }
+    </script>
+</body>
+</html>`);
+});
+
+// --- Página de gestión de órdenes (legacy, mantener para compatibilidad) ---
 app.get("/shopify/orders-test", async (req, res) => {
     const shop = req.query.shop || req.headers["x-shopify-shop-domain"] || "";
 
