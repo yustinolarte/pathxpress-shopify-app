@@ -440,6 +440,45 @@ async function getShopFromDB(shopDomain) {
 }
 
 // ======================
+// HELPER: Contar órdenes realmente "atascadas" (para el badge de Rescue)
+// Debe coincidir con lo que muestra la página /app/stuck-orders:
+//   - Con waybill pero SIN fulfillment en Shopify, y cuyo estado en el portal
+//     ya avanzó (picked_up/in_transit/out_for_delivery/delivered) → debió
+//     fulfillarse pero no se hizo.
+//   - Fulfillment hecho pero el evento "delivered" nunca se envió.
+// Las órdenes en pending_pickup NO cuentan (todavía no deben fulfillarse).
+// ======================
+async function computeStuckCount(shop, clientId) {
+    try {
+        const [noFulfill] = await db.execute(
+            `SELECT COUNT(*) AS c
+             FROM shopify_shipments s
+             LEFT JOIN orders o ON (o.waybillNumber = s.waybill_number AND o.clientId = ?)
+             WHERE s.shop_domain = ?
+               AND (s.shopify_fulfillment_id IS NULL OR s.shopify_fulfillment_id = '')
+               AND s.waybill_number IS NOT NULL AND s.waybill_number != ''
+               AND LOWER(o.status) IN ('picked_up','in_transit','out_for_delivery','delivered')`,
+            [clientId || 0, shop]
+        );
+        const [noDelivered] = await db.execute(
+            `SELECT COUNT(*) AS c
+             FROM shopify_shipments s
+             LEFT JOIN orders o ON (o.waybillNumber = s.waybill_number AND o.clientId = ?)
+             WHERE s.shop_domain = ?
+               AND s.shopify_fulfillment_id IS NOT NULL
+               AND s.shopify_fulfillment_id NOT IN ('', 'ALREADY_FULFILLED')
+               AND LOWER(o.status) = 'delivered'
+               AND (s.last_synced_status IS NULL OR LOWER(s.last_synced_status) <> 'delivered')`,
+            [clientId || 0, shop]
+        );
+        return (noFulfill[0]?.c || 0) + (noDelivered[0]?.c || 0);
+    } catch (e) {
+        console.error("Error computing stuck count:", e.message);
+        return 0;
+    }
+}
+
+// ======================
 // HELPER: Obtener assigned_location de fulfillment_order (dirección de sucursal origen)
 // ======================
 async function getOrderAssignedLocation(shop, accessToken, orderId) {
@@ -1573,6 +1612,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
                     o.pieces, o.weight, o.length, o.width, o.height,
                     o.serviceType, o.status, o.createdAt,
                     o.codRequired, o.codAmount, o.codCurrency,
+                    o.itemsDescription, o.specialInstructions, o.fitOnDelivery,
+                    o.hideConsigneeAddress, o.preferredDeliveryDate, o.preferredDeliveryTime,
                     o.isReturn, o.orderType
                 FROM orders o
                 WHERE o.clientId = ?
@@ -1606,7 +1647,13 @@ app.get("/app", requireSessionToken, async (req, res) => {
                         codRequired: row.codRequired,
                         codAmount: row.codAmount,
                         codCurrency: row.codCurrency,
-                        itemsDescription: row.orderNumber
+                        itemsDescription: row.itemsDescription,
+                        specialInstructions: row.specialInstructions,
+                        fitOnDelivery: row.fitOnDelivery,
+                        hideConsigneeAddress: row.hideConsigneeAddress,
+                        isReturn: row.isReturn,
+                        preferredDeliveryDate: row.preferredDeliveryDate,
+                        preferredDeliveryTime: row.preferredDeliveryTime
                     }).replace(/"/g, '&quot;');
 
                     // Determine type badge
@@ -1671,15 +1718,8 @@ app.get("/app", requireSessionToken, async (req, res) => {
         }
     }
 
-    // Stuck orders count for nav badge
-    let stuckCount = 0;
-    try {
-        const [stuckR] = await db.execute(
-            `SELECT COUNT(*) as cnt FROM shopify_shipments WHERE shop_domain = ? AND (shopify_fulfillment_id IS NULL OR shopify_fulfillment_id = '')`,
-            [shop]
-        );
-        stuckCount = stuckR[0]?.cnt || 0;
-    } catch(_e) {}
+    // Stuck orders count for nav badge (matches the Rescue page rows)
+    const stuckCount = await computeStuckCount(shop, shopData?.pathxpress_client_id);
 
     res.send(`
     <html>
@@ -2940,14 +2980,7 @@ app.get("/app/settings", requireSessionToken, async (req, res) => {
         .replace(/&/g, "&amp;").replace(/</g, "&lt;")
         .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-    let stuckCountSettings = 0;
-    try {
-        const [stuckR2] = await db.execute(
-            `SELECT COUNT(*) as cnt FROM shopify_shipments WHERE shop_domain = ? AND (shopify_fulfillment_id IS NULL OR shopify_fulfillment_id = '')`,
-            [shop]
-        );
-        stuckCountSettings = stuckR2[0]?.cnt || 0;
-    } catch(_e) {}
+    const stuckCountSettings = await computeStuckCount(shop, shopData?.pathxpress_client_id);
 
     // Build the "Default service" options from the client's real, enabled services
     // in the portal. Scheduled services (Preferred Time) are excluded because a
@@ -4073,14 +4106,7 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
         .replace(/&/g, "&amp;").replace(/</g, "&lt;")
         .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-    let stuckCountOrders = 0;
-    try {
-        const [stuckR3] = await db.execute(
-            `SELECT COUNT(*) as cnt FROM shopify_shipments WHERE shop_domain = ? AND (shopify_fulfillment_id IS NULL OR shopify_fulfillment_id = '')`,
-            [shop]
-        );
-        stuckCountOrders = stuckR3[0]?.cnt || 0;
-    } catch(_e) {}
+    const stuckCountOrders = await computeStuckCount(shop, shopData?.pathxpress_client_id);
 
     let rowsHtml = "";
     for (const order of orders) {
@@ -4894,7 +4920,9 @@ app.get("/app/stuck-orders", requireSessionToken, async (req, res) => {
     try {
         const shopData = await getShopFromDB(shop);
 
-        // Orders with no fulfillment ID in Shopify
+        // Orders with no fulfillment ID in Shopify whose portal status already
+        // advanced past pickup (so they SHOULD have been fulfilled but weren't).
+        // Orders still in pending_pickup are intentionally excluded — they aren't stuck.
         const [noFulfillRows] = await db.execute(
             `SELECT s.id, s.shop_order_name, s.waybill_number, s.created_at,
                     o.status AS portal_status, o.updatedAt AS last_sync
@@ -4903,6 +4931,7 @@ app.get("/app/stuck-orders", requireSessionToken, async (req, res) => {
              WHERE s.shop_domain = ?
                AND (s.shopify_fulfillment_id IS NULL OR s.shopify_fulfillment_id = '')
                AND s.waybill_number IS NOT NULL AND s.waybill_number != ''
+               AND LOWER(o.status) IN ('picked_up','in_transit','out_for_delivery','delivered')
              ORDER BY s.created_at DESC
              LIMIT 100`,
             [shopData?.pathxpress_client_id || 0, shop]
@@ -5324,7 +5353,9 @@ app.get("/app/orders/:waybill/tracking", requireSessionToken, async (req, res) =
   .badge.blue{color:var(--st-blue);background:var(--st-blue-bg);} .badge.red{color:var(--accent);background:var(--st-red-bg);}
   .sumrow{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
   .sumrow:last-child{border-bottom:none;} .sumrow span:first-child{color:var(--muted);} .sumrow span:last-child{font-weight:600;font-family:var(--font-display);}
-  .back-link{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;text-decoration:none;font-family:var(--font-display);font-weight:600;margin-bottom:14px;}
+  .back-link{display:inline-flex;align-items:center;gap:8px;color:var(--ink);font-size:14px;text-decoration:none;font-family:var(--font-display);font-weight:600;margin-bottom:18px;padding:10px 18px;border:1px solid var(--line-strong);border-radius:var(--radius-pill);background:var(--surface);box-shadow:var(--shadow-sm);transition:background .15s,border-color .15s;}
+  .back-link:hover{background:var(--surface-2);border-color:var(--ink);}
+  .back-link svg{width:16px;height:16px;}
   @media(max-width:768px){.app-header{padding:12px 16px;}.app-main{padding:18px 16px 0;}}`;
 
         res.send(`<!DOCTYPE html>
@@ -5345,7 +5376,7 @@ app.get("/app/orders/:waybill/tracking", requireSessionToken, async (req, res) =
       <a href="/app?shop=${escHtml(shop)}" class="app-header-logo-text">PATH<em>X</em>PRESS</a>
     </header>
     <main class="app-main">
-      <a href="/app?shop=${escHtml(shop)}" class="back-link">← Back to dashboard</a>
+      <a href="/app?shop=${escHtml(shop)}" class="back-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to dashboard</a>
       ${!order ? `
       <h1 class="page-title">Shipment not found</h1>
       <p class="page-sub">No shipment with waybill <strong>${escHtml(waybill)}</strong> was found for your account.</p>
@@ -5447,7 +5478,8 @@ app.get("/app/cod", requireSessionToken, async (req, res) => {
   .app-main{max-width:1100px;margin:0 auto;padding:26px 32px 0;}
   .page-title{font-family:var(--font-display);font-weight:600;font-size:28px;letter-spacing:-.02em;margin:0 0 4px;}
   p.page-sub{color:var(--muted);font-size:15px;margin:0 0 22px;}
-  .back-link{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px;text-decoration:none;font-family:var(--font-display);font-weight:600;margin-bottom:14px;}
+  .back-link{display:inline-flex;align-items:center;gap:8px;color:var(--ink);font-size:14px;text-decoration:none;font-family:var(--font-display);font-weight:600;margin-bottom:18px;padding:10px 18px;border:1px solid var(--line-strong);border-radius:var(--radius-pill);background:var(--surface);box-shadow:var(--shadow-sm);}
+  .back-link:hover{background:var(--surface-2);border-color:var(--ink);} .back-link svg{width:16px;height:16px;}
   .kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:18px;}
   .kpi-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;box-shadow:var(--shadow-sm);}
   .kpi-card.band{background:var(--band);color:var(--band-ink);border-color:transparent;}
@@ -5482,7 +5514,7 @@ app.get("/app/cod", requireSessionToken, async (req, res) => {
       <a href="/app?shop=${escHtml(shop)}" class="app-header-logo-text">PATH<em>X</em>PRESS</a>
     </header>
     <main class="app-main">
-      <a href="/app?shop=${escHtml(shop)}" class="back-link">← Back to dashboard</a>
+      <a href="/app?shop=${escHtml(shop)}" class="back-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back to dashboard</a>
       <h1 class="page-title">COD reconciliation</h1>
       <p class="page-sub">Cash-on-delivery collected on your behalf and remitted to your account.</p>
 
