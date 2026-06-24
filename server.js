@@ -3428,6 +3428,47 @@ app.get("/api/shop-locations", requireSessionToken, async (req, res) => {
 });
 
 // ======================
+// 4.1.4.1) AVAILABLE SERVICES (for per-sync service picker on /app/orders)
+// Returns the client's real enabled services from the portal. Scheduled
+// services (Preferred Time) are excluded because manual sync can't capture
+// their per-order date/time. Falls back to a static list if portal is down.
+// ======================
+app.get("/api/services", requireSessionToken, async (req, res) => {
+    const session = req.shopifySession;
+    let shop = session ? session.shop : req.query.shop;
+    if (!shop) return res.status(401).json({ error: "Unauthorized" });
+
+    try {
+        const shopData = await getShopFromDB(shop);
+        if (!shopData?.access_token) return res.status(401).json({ error: "Shop not found" });
+
+        const clientId = shopData.pathxpress_client_id || 1;
+        const defaultService = shopData.default_service_type || "DOM";
+
+        let services = [];
+        try {
+            const portalServices = await fetchPortalServices(clientId, {});
+            services = portalServices
+                .filter(s => s.available && !s.requiresScheduling)
+                .map(s => ({ code: s.code, displayName: s.displayName, deliveryTime: s.deliveryTime || null }));
+        } catch (_e) { /* fall through to fallback below */ }
+
+        if (!services.length) {
+            services = [
+                { code: 'DOM', displayName: 'DOM — Next Day', deliveryTime: '1-2 days' },
+                { code: 'SDD', displayName: 'SDD — Same Day', deliveryTime: 'Same day' },
+                { code: 'BULLET', displayName: 'BULLET — 4 Hours', deliveryTime: '4 hours' },
+            ];
+        }
+
+        res.json({ services, default: defaultService });
+    } catch (err) {
+        console.error("⛔ Error fetching available services:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+});
+
+// ======================
 // 4.1.4.2) UPDATE SHIPPER ADDRESS (pending_pickup only)
 // ======================
 app.put("/api/orders/:orderId/shipper", requireSessionToken, async (req, res) => {
@@ -3566,8 +3607,11 @@ app.post("/api/shipping-rates", async (req, res) => {
             const freeExpress = shopData.free_shipping_threshold_express ? parseFloat(shopData.free_shipping_threshold_express) : 0;
             const orderTotal = items.reduce((sum, it) => sum + (parseInt(it.price || 0) / 100) * (it.quantity || 1), 0);
 
-            const portalServices = await fetchPortalServices(clientId, { emirate: emirateRaw, weight: totalWeightKg });
-            const usable = portalServices.filter(s => s.available && !s.requiresScheduling && s.price != null);
+            // Send the full emirate NAME (not Shopify's "DU"/"RK" code) so the
+            // portal resolves the correct zone/price and applies per-service region rules.
+            const portalServices = await fetchPortalServices(clientId, { emirate: emirateName(emirateRaw), weight: totalWeightKg });
+            // Only offer services that are available for this destination AND have a real configured price.
+            const usable = portalServices.filter(s => s.available && !s.requiresScheduling && s.price != null && Number(s.price) > 0);
 
             if (usable.length) {
                 const now = Date.now();
@@ -3797,6 +3841,32 @@ function getZoneFromEmirate(emirate) {
     if (zone2Names.some(z => normalized.includes(z))) return 2;
 
     return 3;
+}
+
+// Helper: Normalizar provincia/emirato de Shopify (código ISO o nombre) al nombre
+// completo del emirato que el Portal entiende (para zona + availableRegions).
+// Shopify envía códigos como "DU"/"RK" que el Portal no reconoce → zona/precio mal.
+function emirateName(raw) {
+    if (!raw) return raw;
+    // Drop a leading country prefix ("AE-DU" → "du") and normalize spacing.
+    const n = String(raw).toLowerCase().trim()
+        .replace(/^ae[\s-]+/, '').replace(/-/g, ' ').replace(/\s+/g, ' ');
+    const map = {
+        'du': 'Dubai', 'dubai': 'Dubai',
+        'sh': 'Sharjah', 'sharjah': 'Sharjah',
+        'aj': 'Ajman', 'ajman': 'Ajman',
+        'az': 'Abu Dhabi', 'abu dhabi': 'Abu Dhabi', 'abudhabi': 'Abu Dhabi',
+        'rk': 'Ras Al Khaimah', 'ras al khaimah': 'Ras Al Khaimah', 'rak': 'Ras Al Khaimah',
+        'fu': 'Fujairah', 'fujairah': 'Fujairah',
+        'uq': 'Umm Al Quwain', 'umm al quwain': 'Umm Al Quwain', 'uaq': 'Umm Al Quwain',
+        'aa': 'Al Ain', 'al ain': 'Al Ain',
+    };
+    if (map[n]) return map[n];
+    // Fall back to a full-name substring match (ignore 2-letter codes to avoid false hits).
+    for (const [k, v] of Object.entries(map)) {
+        if (k.length > 2 && n.includes(k)) return v;
+    }
+    return raw;
 }
 
 // Helper: Tarifas por defecto (fallback)
@@ -4418,11 +4488,89 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
             });
         }
 
+        // Service picker: instead of syncing immediately, open a modal so the
+        // merchant chooses ONE service applied to all selected orders. This is the
+        // Basic-plan path (no dynamic rates at checkout → pick the service here).
+        var SERVICES_CACHE = null;
+        var pendingSyncOrderIds = [];
+
         function syncSelected() {
             var checked = getChecked();
             if (checked.length === 0) return;
+            pendingSyncOrderIds = checked.map(function(cb) { return cb.value; });
+            openSyncModal(checked.length);
+        }
 
-            var orderIds = checked.map(function(cb) { return cb.value; });
+        function openSyncModal(count) {
+            var modal = document.getElementById("svcModal");
+            var sub = document.getElementById("svcModalSub");
+            if (sub) sub.textContent = count + " order" + (count !== 1 ? "s" : "") + " selected — choose a service for all of them.";
+            modal.classList.add("open");
+            loadServices();
+        }
+
+        function closeSyncModal() {
+            document.getElementById("svcModal").classList.remove("open");
+        }
+
+        function loadServices() {
+            var list = document.getElementById("svcList");
+            var confirmBtn = document.getElementById("svcConfirmBtn");
+            if (SERVICES_CACHE) { renderServices(SERVICES_CACHE.services, SERVICES_CACHE.default); return; }
+            list.innerHTML = '<p style="color:#6B6F77;font-size:13px;text-align:center;padding:14px;">Loading services…</p>';
+            confirmBtn.disabled = true;
+            (async function() {
+                try {
+                    var token = null;
+                    if (window.shopify && window.shopify.idToken) token = await window.shopify.idToken();
+                    var headers = {};
+                    if (token) headers["Authorization"] = "Bearer " + token;
+                    var res = await fetch("/api/services?shop=" + encodeURIComponent(SHOP), { headers: headers });
+                    if (!res.ok) throw new Error("Server " + res.status);
+                    var data = await res.json();
+                    SERVICES_CACHE = data;
+                    renderServices(data.services || [], data.default);
+                } catch (err) {
+                    list.innerHTML = '<p style="color:#E10600;font-size:13px;text-align:center;padding:14px;">Could not load services: ' + err.message + '</p>';
+                }
+            })();
+        }
+
+        function renderServices(services, defaultCode) {
+            var list = document.getElementById("svcList");
+            var confirmBtn = document.getElementById("svcConfirmBtn");
+            if (!services.length) {
+                list.innerHTML = '<p style="color:#6B6F77;font-size:13px;text-align:center;padding:14px;">No services available.</p>';
+                return;
+            }
+            list.innerHTML = services.map(function(s) {
+                return '<div class="svc-option" data-code="' + s.code + '" onclick="selectService(this)">'
+                    + '<span class="radio-outer"><span class="radio-dot"></span></span>'
+                    + '<span><span class="svc-name">' + s.displayName + '</span>'
+                    + (s.deliveryTime ? '<span class="svc-meta">' + s.deliveryTime + '</span>' : '') + '</span>'
+                    + '</div>';
+            }).join("");
+            var preferred = list.querySelector('.svc-option[data-code="' + (defaultCode || '') + '"]') || list.querySelector('.svc-option');
+            if (preferred) selectService(preferred);
+            confirmBtn.disabled = false;
+        }
+
+        function selectService(el) {
+            document.querySelectorAll("#svcList .svc-option").forEach(function(o){ o.classList.remove("selected"); });
+            el.classList.add("selected");
+            document.getElementById("svcConfirmBtn").disabled = false;
+        }
+
+        function confirmSync() {
+            var sel = document.querySelector("#svcList .svc-option.selected");
+            if (!sel) return;
+            var serviceType = sel.getAttribute("data-code");
+            closeSyncModal();
+            doSync(pendingSyncOrderIds, serviceType);
+        }
+
+        function doSync(orderIds, serviceType) {
+            if (!orderIds || orderIds.length === 0) return;
             var syncBtn = document.getElementById("syncBtn");
             syncBtn.disabled = true;
             syncBtn.textContent = "Syncing...";
@@ -4432,15 +4580,15 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
             progressBar.style.display = "block";
             progressFill.style.width = "10%";
 
-            checked.forEach(function(cb) {
-                var cell = document.getElementById("result-" + cb.value);
+            orderIds.forEach(function(id) {
+                var cell = document.getElementById("result-" + id);
                 if (cell) cell.innerHTML = '<span class="badge syncing">Syncing...</span>';
             });
 
             fetch("/shopify/manual-sync", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ shop: SHOP, orderIds: orderIds })
+                body: JSON.stringify({ shop: SHOP, orderIds: orderIds, serviceType: serviceType })
             })
             .then(function(resp) { return resp.json(); })
             .then(function(data) {
@@ -4466,7 +4614,7 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
                 setTimeout(function() { progressBar.style.display = "none"; progressFill.style.width = "0%"; }, 800);
                 syncBtn.textContent = "Sync Selected (0)";
                 syncBtn.disabled = true;
-                document.getElementById("selectAll").checked = false;
+                var sa = document.getElementById("selectAll"); if (sa) sa.checked = false;
             })
             .catch(function(err) {
                 progressBar.style.display = "none";
@@ -4539,6 +4687,42 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
             });
         }
     </script>
+
+    <style>
+      .modal-overlay{display:none;position:fixed;inset:0;z-index:100;background:rgba(20,22,26,.45);backdrop-filter:blur(2px);align-items:center;justify-content:center;padding:20px;}
+      .modal-overlay.open{display:flex;}
+      .modal{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);width:100%;max-width:440px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;}
+      .modal-head{padding:20px 22px 14px;border-bottom:1px solid var(--line);}
+      .modal-title{font-family:var(--font-display);font-weight:600;font-size:18px;margin:0;}
+      .modal-sub{font-size:13px;color:var(--muted);margin:4px 0 0;}
+      .modal-body{padding:16px 22px;overflow-y:auto;}
+      .modal-foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;background:var(--surface-2);}
+      .svc-option{display:flex;align-items:center;gap:12px;padding:13px 15px;border-radius:var(--radius-sm);cursor:pointer;border:1px solid var(--line);background:var(--surface-2);margin-bottom:10px;transition:border-color .15s,background .15s;}
+      .svc-option:hover{border-color:var(--line-strong);}
+      .svc-option.selected{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);}
+      .svc-option .radio-outer{flex:none;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--line-strong);}
+      .svc-option.selected .radio-outer{border-color:var(--accent);}
+      .svc-option .radio-dot{width:9px;height:9px;border-radius:50%;background:var(--accent);transform:scale(0);transition:transform .15s;}
+      .svc-option.selected .radio-dot{transform:scale(1);}
+      .svc-name{font-family:var(--font-display);font-weight:600;font-size:14px;display:block;}
+      .svc-meta{font-size:12px;color:var(--muted);margin-top:1px;display:block;}
+    </style>
+
+    <div class="modal-overlay" id="svcModal" onclick="if(event.target===this)closeSyncModal()">
+      <div class="modal">
+        <div class="modal-head">
+          <h2 class="modal-title">Choose a service</h2>
+          <p class="modal-sub" id="svcModalSub"></p>
+        </div>
+        <div class="modal-body">
+          <div id="svcList"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn-outline" onclick="closeSyncModal()">Cancel</button>
+          <button class="btn-primary" id="svcConfirmBtn" onclick="confirmSync()" disabled>Confirm &amp; Sync</button>
+        </div>
+      </div>
+    </div>
 </body>
 </html>`);
 });
@@ -5593,11 +5777,16 @@ app.get("/app/waybill/:waybill.pdf", requireSessionToken, async (req, res) => {
 
 // --- Endpoint de sincronización manual (batch) ---
 app.post("/shopify/manual-sync", express.json(), async (req, res) => {
-    const { shop, orderIds } = req.body || {};
+    const { shop, orderIds, serviceType } = req.body || {};
 
     if (!shop || !Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "Missing shop or orderIds array" });
     }
+    // Optional per-sync service override chosen in the picker modal. Keep it as a
+    // short alphanumeric code; otherwise ignore and let orderToShipment use the default.
+    const serviceOverride = (typeof serviceType === "string" && /^[A-Z0-9_]{1,40}$/i.test(serviceType.trim()))
+        ? serviceType.trim()
+        : null;
     if (!/^[a-z0-9-]+\.myshopify\.com$/i.test(shop)) {
         return res.status(400).json({ error: "Invalid shop parameter" });
     }
@@ -5647,7 +5836,7 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
             const assignedLocation = await getOrderAssignedLocation(shop, shopData.access_token, order.id);
 
             // 4. Full sync flow
-            const shipment = orderToShipment(order, shop, shopData, assignedLocation);
+            const shipment = orderToShipment(order, shop, shopData, assignedLocation, serviceOverride);
 
             const portalWaybill = await sendShipmentToPathxpress(shipment);
             if (portalWaybill) shipment.waybillNumber = portalWaybill;
@@ -6550,7 +6739,7 @@ function detectCOD(order) {
     return { isCOD, codAmount };
 }
 
-function orderToShipment(order, shop, shopData, assignedLocation = null) {
+function orderToShipment(order, shop, shopData, assignedLocation = null, serviceTypeOverride = null) {
     const shipping = order.shipping_address || order.billing_address || {};
     const customer = order.customer || {};
 
@@ -6590,8 +6779,8 @@ function orderToShipment(order, shop, shopData, assignedLocation = null) {
         console.warn(`⚠️ Shop ${shop} does NOT have pathxpress_client_id configured. Using default: 1`);
     }
 
-    // Determinar Service Type - Usar el tipo de servicio por defecto configurado
-    const serviceType = shopData?.default_service_type || "DOM";
+    // Determinar Service Type - Override por orden (selector manual) → default de la tienda → DOM
+    const serviceType = serviceTypeOverride || shopData?.default_service_type || "DOM";
 
     return {
         // info de integración
