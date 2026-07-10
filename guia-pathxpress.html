@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>User &amp; Setup Guide — PATHXPRESS Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Hanken+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================= *
+ *  DOCUMENT STYLES (the guide)                                   *
+ * ============================================================= */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+body{
+  margin:0;
+  font-family:'Hanken Grotesk',system-ui,-apple-system,sans-serif;
+  color:#16181C;
+  background:#E9E8E3;
+  line-height:1.6;
+}
+:root{
+  --doc-accent:#E10600;
+  --doc-ink:#16181C;
+  --doc-muted:#6B6F77;
+  --doc-line:rgba(20,22,26,.12);
+}
+.page{
+  background:#fff;
+  max-width:920px;
+  margin:26px auto;
+  padding:56px 64px;
+  box-shadow:0 10px 40px -18px rgba(0,0,0,.35);
+  border-radius:6px;
+}
+h1,h2,h3,h4{font-family:'Outfit',system-ui,sans-serif;letter-spacing:-.02em;color:#16181C;line-height:1.2;}
+h2{font-size:27px;font-weight:700;margin:0 0 6px;}
+h3{font-size:19px;font-weight:600;margin:30px 0 10px;}
+h4{font-size:15.5px;font-weight:600;margin:20px 0 7px;}
+p{margin:0 0 13px;font-size:15px;color:#2C2F34;}
+a{color:var(--doc-accent);}
+ul,ol{margin:0 0 14px;padding-left:22px;}
+li{margin:5px 0;font-size:15px;}
+strong{font-weight:600;color:#16181C;}
+code{font-family:'Space Mono',ui-monospace,monospace;font-size:.86em;background:#F1F0EC;padding:2px 6px;border-radius:5px;color:#16181C;}
+em{font-style:italic;}
+.section-num{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--doc-accent);font-weight:700;display:block;margin-bottom:8px;}
+.lead{font-size:16.5px;color:#3C4046;}
+hr{border:none;border-top:1px solid var(--doc-line);margin:30px 0;}
+
+/* callouts */
+.note,.tip,.warn{
+  border-radius:12px;padding:14px 18px 14px 16px;margin:18px 0;font-size:14.5px;
+  border:1px solid var(--doc-line);display:flex;gap:12px;align-items:flex-start;
+}
+.note{background:#F2F6FD;border-color:#cfe0f7;}
+.tip{background:#F0FAF5;border-color:#bfe6d3;}
+.warn{background:#FDF2F2;border-color:#f3c9c9;}
+.note .ic,.tip .ic,.warn .ic{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-weight:700;font-family:'Outfit';font-size:14px;color:#fff;}
+.note .ic{background:#2A6FDB;}
+.tip .ic{background:#1F8A5B;}
+.warn .ic{background:var(--doc-accent);}
+.callout-title{font-family:'Outfit';font-weight:600;display:block;margin-bottom:2px;}
+
+/* steps */
+.steps{counter-reset:step;list-style:none;padding:0;margin:18px 0;}
+.steps>li{counter-increment:step;position:relative;padding:0 0 18px 46px;margin:0;}
+.steps>li::before{
+  content:counter(step);position:absolute;left:0;top:-2px;width:30px;height:30px;border-radius:50%;
+  background:var(--doc-accent);color:#fff;font-family:'Outfit';font-weight:700;font-size:14px;
+  display:grid;place-items:center;
+}
+.steps>li::after{content:"";position:absolute;left:14px;top:30px;bottom:2px;width:2px;background:var(--doc-line);}
+.steps>li:last-child::after{display:none;}
+.steps .st-title{font-family:'Outfit';font-weight:600;font-size:15.5px;}
+
+/* spec table */
+table.doc-table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14px;}
+table.doc-table th,table.doc-table td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--doc-line);vertical-align:top;}
+table.doc-table th{font-family:'Outfit';font-weight:600;background:#FAF9F6;}
+table.doc-table td code{white-space:nowrap;}
+
+/* figure / screenshot frame */
+figure{margin:22px 0 10px;}
+figcaption{font-size:12.5px;color:var(--doc-muted);text-align:center;margin-top:9px;font-family:'Space Mono',monospace;letter-spacing:.02em;}
+.browser{
+  border:1px solid rgba(20,22,26,.16);border-radius:12px;overflow:hidden;
+  box-shadow:0 18px 50px -26px rgba(20,22,26,.5);background:#fff;
+}
+.browser-bar{
+  display:flex;align-items:center;gap:10px;padding:9px 14px;background:#ECEBE6;border-bottom:1px solid rgba(20,22,26,.12);
+}
+.browser-dots{display:flex;gap:6px;}
+.browser-dots i{width:11px;height:11px;border-radius:50%;display:block;}
+.browser-dots i:nth-child(1){background:#ff5f57;}
+.browser-dots i:nth-child(2){background:#febc2e;}
+.browser-dots i:nth-child(3){background:#28c840;}
+.browser-url{
+  flex:1;background:#fff;border:1px solid rgba(20,22,26,.12);border-radius:7px;padding:5px 12px;
+  font-family:'Space Mono',monospace;font-size:11px;color:#6B6F77;display:flex;align-items:center;gap:7px;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+}
+.browser-url svg{flex:none;}
+.shopify-chip{font-family:'Outfit';font-weight:600;font-size:11px;color:#5a8a3a;background:#eaf4e0;border:1px solid #cfe6bb;border-radius:20px;padding:2px 9px;flex:none;}
+
+/* mini index */
+.toc{list-style:none;padding:0;margin:8px 0 0;}
+.toc li{display:flex;align-items:baseline;gap:10px;padding:9px 0;border-bottom:1px solid var(--doc-line);font-size:15px;}
+.toc li .n{font-family:'Space Mono',monospace;color:var(--doc-accent);font-weight:700;font-size:13px;flex:none;width:26px;}
+.toc li .t{font-family:'Outfit';font-weight:600;}
+.toc li .d{color:var(--doc-muted);font-size:13px;margin-left:auto;text-align:right;}
+
+/* cover */
+.cover{
+  background:#16181C;color:#F4F3EF;max-width:920px;margin:26px auto;border-radius:6px;overflow:hidden;
+  position:relative;padding:90px 64px 64px;box-shadow:0 10px 40px -18px rgba(0,0,0,.5);
+}
+.cover .bigx{position:absolute;right:-40px;bottom:-90px;font-family:'Outfit';font-weight:800;font-size:430px;line-height:1;color:var(--doc-accent);opacity:.13;pointer-events:none;}
+.cover-logo{font-family:'Outfit';font-weight:800;font-size:34px;letter-spacing:-.03em;}
+.cover-logo em{color:var(--doc-accent);font-style:normal;}
+.cover-eyebrow{font-family:'Space Mono',monospace;font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:#9CA0A8;margin:58px 0 16px;}
+.cover h1{font-size:50px;font-weight:700;color:#fff;margin:0 0 16px;line-height:1.05;position:relative;}
+.cover p.sub{font-size:18px;color:#C7CAD0;max-width:560px;position:relative;}
+.cover .meta{display:flex;gap:30px;margin-top:52px;position:relative;flex-wrap:wrap;}
+.cover .meta div{font-size:13px;color:#9CA0A8;font-family:'Space Mono',monospace;}
+.cover .meta div strong{display:block;color:#F4F3EF;font-family:'Outfit';font-size:15px;font-weight:600;margin-top:3px;}
+
+/* ============================================================= *
+ *  APP UI RECREATION (scoped under .px — native CSS nesting)     *
+ *  Same tokens & components as server.js                        *
+ * ============================================================= */
+.px{
+  --font-display:'Outfit',system-ui,sans-serif;
+  --font-body:'Hanken Grotesk',system-ui,sans-serif;
+  --font-mono:'Space Mono',ui-monospace,monospace;
+  --radius:14px;--radius-sm:10px;--radius-pill:999px;
+  --bg:#F4F3EF;--surface:#FFFFFF;--surface-2:#FAF9F6;
+  --ink:#16181C;--ink-2:#3C4046;--muted:#6B6F77;
+  --line:rgba(20,22,26,.11);--line-strong:rgba(20,22,26,.20);
+  --accent:#E10600;--accent-ink:#FFFFFF;
+  --band:#16181C;--band-ink:#F4F3EF;
+  --shadow-sm:0 1px 2px rgba(20,22,26,.05);
+  --st-green:#1F8A5B;--st-green-bg:#1f8a5b1a;
+  --st-amber:#B5790A;--st-amber-bg:#b5790a1a;
+  --st-blue:#2A6FDB;--st-blue-bg:#2a6fdb1a;
+  font-family:var(--font-body);background:var(--bg);color:var(--ink);display:block;
+
+  *{box-sizing:border-box;}
+  .app-header{display:flex;align-items:center;gap:18px;padding:14px 26px;background:var(--surface);border-bottom:1px solid var(--line);}
+  .app-header-logo-text{font-family:var(--font-display);font-weight:800;font-size:18px;letter-spacing:-.03em;color:var(--ink);}
+  .app-header-logo-text em{color:var(--accent);font-style:normal;}
+  .app-header-divider{width:1px;height:26px;background:var(--line);}
+  .app-header-shop{display:flex;flex-direction:column;line-height:1.25;}
+  .app-header-shop-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);}
+  .app-header-shop-name{font-family:var(--font-display);font-weight:600;font-size:14px;}
+  .app-header-right{margin-left:auto;display:flex;align-items:center;gap:14px;}
+  .badge-connected{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:600;font-size:13px;color:var(--st-green);padding:7px 14px;border-radius:var(--radius-pill);background:var(--st-green-bg);}
+  .badge-connected-dot{width:8px;height:8px;border-radius:50%;background:var(--st-green);}
+  .badge-disconnected{display:inline-flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:600;font-size:13px;color:var(--accent);padding:7px 14px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--accent) 12%,transparent);}
+  .badge-disconnected-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);}
+  .app-nav-wrap{padding:16px 26px 0;}
+  .app-nav{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);padding:6px;width:max-content;max-width:100%;box-shadow:var(--shadow-sm);}
+  .app-nav a{display:inline-flex;align-items:center;gap:8px;padding:10px 15px;border-radius:9px;font-family:var(--font-body);font-size:14px;font-weight:600;white-space:nowrap;text-decoration:none;color:var(--muted);}
+  .app-nav a.active{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);}
+  .app-nav a svg{width:17px;height:17px;flex-shrink:0;}
+  .nav-badge{font-family:var(--font-mono);font-size:10px;background:var(--accent);color:#fff;border-radius:20px;padding:1px 7px;font-weight:700;}
+  .app-main{padding:24px 26px;}
+  .page-title{font-family:var(--font-display);font-weight:600;font-size:27px;letter-spacing:-.02em;margin:0 0 4px;}
+  .page-sub{color:var(--muted);font-size:14.5px;margin:0 0 20px;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:20px;margin-bottom:16px;}
+  .card-nop{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-sm);margin-bottom:16px;overflow:hidden;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px;}
+  .kpi-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow-sm);}
+  .kpi-card.band{position:relative;overflow:hidden;background:var(--band);color:var(--band-ink);border-color:transparent;}
+  .kpi-card.band .bigx{position:absolute;right:-14px;bottom:-40px;font-family:var(--font-display);font-weight:700;font-size:130px;line-height:1;color:var(--accent);opacity:.16;}
+  .kpi-top{display:flex;align-items:center;justify-content:space-between;position:relative;}
+  .kpi-label{font-size:13px;color:var(--muted);font-weight:500;}
+  .kpi-card.band .kpi-label{color:color-mix(in srgb,var(--band-ink) 65%,transparent);}
+  .kpi-icon{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--surface-2);color:var(--ink);}
+  .kpi-card.band .kpi-icon{background:color-mix(in srgb,var(--band-ink) 12%,transparent);color:var(--band-ink);}
+  .kpi-val{font-family:var(--font-display);font-weight:600;font-size:31px;letter-spacing:-.03em;margin:12px 0 4px;position:relative;}
+  .kpi-sub{font-size:12.5px;color:var(--muted);position:relative;}
+  .kpi-card.band .kpi-sub{color:color-mix(in srgb,var(--band-ink) 65%,transparent);}
+  .card-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--line);gap:14px;flex-wrap:wrap;}
+  .card-header-title{font-family:var(--font-display);font-weight:600;font-size:16px;margin:0;}
+  .card-header-sub{font-size:13px;color:var(--muted);margin-top:2px;}
+  .table-wrap{overflow-x:auto;padding:6px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{text-align:left;font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:400;padding:8px 12px 11px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  tbody td{padding:12px;border-bottom:1px solid var(--line);}
+  tbody tr:last-child td{border-bottom:none;}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:600;font-family:var(--font-display);white-space:nowrap;}
+  .badge.green{color:var(--st-green);background:var(--st-green-bg);}
+  .badge.amber{color:var(--st-amber);background:var(--st-amber-bg);}
+  .badge.blue{color:var(--st-blue);background:var(--st-blue-bg);}
+  .badge.gray{color:var(--muted);background:color-mix(in srgb,var(--muted) 14%,transparent);}
+  .badge.red{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);}
+  .badge.pending{color:var(--st-amber);background:var(--st-amber-bg);}
+  .badge.synced{color:var(--st-green);background:var(--st-green-bg);}
+  .btn-primary{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 19px;border-radius:var(--radius-pill);font-family:var(--font-display);font-weight:600;font-size:14px;border:none;cursor:pointer;background:var(--accent);color:var(--accent-ink);}
+  .btn-primary:disabled{background:var(--surface-2);color:var(--muted);border:1px solid var(--line);}
+  .btn-primary-lg{height:48px;padding:0 26px;font-size:15px;}
+  .btn-outline{display:inline-flex;align-items:center;gap:8px;height:42px;padding:0 19px;border-radius:var(--radius-pill);font-family:var(--font-display);font-weight:600;font-size:14px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);}
+  .btn-sm{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;border:1px solid var(--line-strong);background:transparent;color:var(--ink);font-family:var(--font-display);font-weight:600;font-size:12.5px;}
+  .print-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:8px;border:none;background:var(--ink);color:#fff;font-family:var(--font-display);font-weight:600;font-size:12.5px;}
+  .toolbar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:13px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:14px;box-shadow:var(--shadow-sm);}
+  .search-wrap{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-pill);padding:8px 14px;color:var(--muted);}
+  .search-wrap span{font-size:13px;}
+  .field-label{display:block;font-family:var(--font-display);font-weight:600;font-size:13.5px;margin-bottom:8px;}
+  label{font-family:var(--font-display);font-weight:600;font-size:13.5px;}
+  .field{width:100%;height:42px;padding:0 14px;border-radius:var(--radius-sm);border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink);font-family:var(--font-body);font-size:14px;display:flex;align-items:center;}
+  .field.mono{font-family:var(--font-mono);}
+  .field-help{font-size:12.5px;color:var(--muted);margin:9px 0 0;}
+  .feedback-box{padding:11px 15px;border-radius:var(--radius-sm);font-size:14px;margin-bottom:14px;}
+  .feedback-success{background:var(--st-green-bg);border:1px solid color-mix(in srgb,var(--st-green) 30%,transparent);color:var(--st-green);}
+  .section-heading{display:flex;align-items:center;gap:9px;font-family:var(--font-display);font-weight:600;font-size:15.5px;margin-bottom:15px;}
+  .section-heading svg{color:var(--accent);}
+  .sync-mode-options{display:flex;flex-direction:column;gap:10px;}
+  .sync-mode-option{display:flex;align-items:flex-start;gap:12px;padding:14px 15px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface-2);}
+  .sync-mode-option.selected{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent);}
+  .radio-outer{flex:none;width:18px;height:18px;margin-top:1px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--line-strong);}
+  .sync-mode-option.selected .radio-outer{border-color:var(--accent);}
+  .radio-dot{width:9px;height:9px;border-radius:50%;background:var(--accent);transform:scale(0);}
+  .sync-mode-option.selected .radio-dot{transform:scale(1);}
+  .sync-mode-label{display:flex;flex-direction:column;gap:3px;}
+  .sync-mode-label strong{font-family:var(--font-display);font-weight:600;font-size:14.5px;color:var(--ink);}
+  .sync-mode-label span{font-size:13px;color:var(--muted);}
+  .checkbox-row{display:flex;align-items:center;gap:11px;}
+  .cbx{width:18px;height:18px;border-radius:5px;border:2px solid var(--accent);background:var(--accent);display:grid;place-items:center;color:#fff;flex:none;}
+  .cbx.empty{background:var(--surface-2);border-color:var(--line-strong);}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:15px;}
+  .filter-tabs{display:flex;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:4px;gap:4px;}
+  .filter-tab{padding:6px 13px;font-size:12.5px;font-weight:600;font-family:var(--font-display);border-radius:6px;color:var(--muted);border:none;background:none;}
+  .filter-tab.active{background:var(--accent);color:#fff;}
+  .banner-blue{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius);border:1px solid color-mix(in srgb,var(--st-blue) 30%,transparent);background:var(--st-blue-bg);margin-bottom:16px;font-size:13px;color:var(--ink-2);}
+  .banner-red{display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:var(--radius);border:1px solid color-mix(in srgb,var(--accent) 26%,transparent);background:color-mix(in srgb,var(--accent) 6%,transparent);margin-bottom:16px;font-size:13.5px;}
+  .warn-card{background:color-mix(in srgb,var(--accent) 7%,transparent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:12px;padding:18px;}
+  .warn-card h3{color:var(--accent);margin:0 0 8px;display:flex;align-items:center;gap:8px;font-family:var(--font-display);font-size:16px;}
+  .empty-hero{text-align:center;padding:46px 24px;}
+  .empty-hero .ic{width:54px;height:54px;border-radius:15px;display:grid;place-items:center;margin:0 auto 16px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);}
+  .empty-hero h2{font-family:var(--font-display);font-weight:600;font-size:23px;margin:0 0 8px;color:var(--ink);}
+  .empty-hero p{color:var(--muted);font-size:14.5px;max-width:360px;margin:0 auto 22px;}
+  .sumrow{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .sumrow:last-child{border-bottom:none;}
+  .sumrow>span:first-child{color:var(--muted);}
+  .timeline{position:relative;padding-left:26px;}
+  .timeline .ev{position:relative;padding:0 0 20px;}
+  .timeline .ev::before{content:"";position:absolute;left:-26px;top:2px;width:13px;height:13px;border-radius:50%;background:var(--surface);border:2px solid var(--line-strong);}
+  .timeline .ev.done::before{background:var(--st-green);border-color:var(--st-green);}
+  .timeline .ev.current::before{background:var(--accent);border-color:var(--accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 18%,transparent);}
+  .timeline .ev::after{content:"";position:absolute;left:-20px;top:16px;bottom:-2px;width:2px;background:var(--line);}
+  .timeline .ev:last-child::after{display:none;}
+  .timeline .ev-title{font-family:var(--font-display);font-weight:600;font-size:14px;}
+  .timeline .ev-meta{font-size:12px;color:var(--muted);font-family:var(--font-mono);}
+}
+
+/* ============================================================= *
+ *  PRINT — clean, predictable pagination                        *
+ * ============================================================= */
+@page{size:A4;margin:12mm;}
+@media print{
+  body{background:#fff;}
+  .cover{box-shadow:none;margin:0;border-radius:0;max-width:100%;padding:64px 46px;break-after:page;}
+  .cover .bigx{font-size:360px;}
+  .page{
+    box-shadow:none;margin:0;border-radius:0;max-width:100%;padding:0;
+    break-before:page;
+  }
+  /* keep blocks intact across page boundaries */
+  figure,.note,.tip,.warn,table.doc-table,.steps>li{break-inside:avoid;}
+  .browser{break-inside:avoid;}
+  h2,h3,h4{break-after:avoid;}
+  figcaption{break-before:avoid;}
+  /* shrink the recreated screenshots so each one always fits on a single page */
+  .browser{zoom:.82;}
+  .no-print{display:none;}
+}
+</style>
+</head>
+<body>
+
+<!-- ============================ COVER ============================ -->
+<div class="cover">
+  <div class="bigx">X</div>
+  <div class="cover-logo">PATH<em>X</em>PRESS</div>
+  <div class="cover-eyebrow">Shopify App · Official guide</div>
+  <h1>User &amp; Setup<br>Guide</h1>
+  <p class="sub">How to install, connect and operate PATHXPRESS Portal inside the Shopify admin: order sync, shipping labels, tracking and COD reconciliation.</p>
+  <div class="meta">
+    <div>Product<strong>PATHXPRESS Portal</strong></div>
+    <div>Version<strong>1.0</strong></div>
+    <div>Updated<strong>June 2026</strong></div>
+    <div>Region<strong>United Arab Emirates</strong></div>
+  </div>
+</div>
+
+<!-- ============================ TOC ============================ -->
+<div class="page">
+  <span class="section-num">Contents</span>
+  <h2>Table of contents</h2>
+  <ul class="toc">
+    <li><span class="n">01</span><span class="t">What is PATHXPRESS?</span><span class="d">Overview</span></li>
+    <li><span class="n">02</span><span class="t">Prerequisites</span><span class="d">Before you start</span></li>
+    <li><span class="n">03</span><span class="t">Install &amp; connect</span><span class="d">Shopify OAuth</span></li>
+    <li><span class="n">04</span><span class="t">Initial setup</span><span class="d">Settings screen</span></li>
+    <li><span class="n">05</span><span class="t">Checkout shipping rates</span><span class="d">Carrier service</span></li>
+    <li><span class="n">06</span><span class="t">The Dashboard</span><span class="d">Metrics &amp; shipments</span></li>
+    <li><span class="n">07</span><span class="t">Order management</span><span class="d">Sync to PathXpress</span></li>
+    <li><span class="n">08</span><span class="t">Labels &amp; waybills</span><span class="d">Printing</span></li>
+    <li><span class="n">09</span><span class="t">Shipment tracking</span><span class="d">Tracking</span></li>
+    <li><span class="n">10</span><span class="t">COD reconciliation</span><span class="d">Cash on delivery</span></li>
+    <li><span class="n">11</span><span class="t">Rescue stuck orders</span><span class="d">Rescue</span></li>
+    <li><span class="n">12</span><span class="t">FAQ &amp; troubleshooting</span><span class="d">Help</span></li>
+  </ul>
+
+  <div class="note">
+    <span class="ic">i</span>
+    <div><span class="callout-title">About the screenshots in this guide</span>
+    The screens shown are faithful reproductions of the app's real interface (same fonts, colors and components as the portal). Order, customer and waybill data are examples.</div>
+  </div>
+</div>
+
+<!-- ===================== 01 OVERVIEW ===================== -->
+<div class="page">
+  <span class="section-num">Section 01</span>
+  <h2>What is PATHXPRESS?</h2>
+  <p class="lead">PATHXPRESS Portal is an app <strong>embedded in the Shopify admin</strong> that connects your store to the PathXpress courier network to automate the entire shipping cycle.</p>
+  <p>From the app you can send orders to the courier, generate waybill numbers, print labels, track each shipment, handle returns and exchanges, and reconcile the money collected on delivery (COD). All without leaving your Shopify admin.</p>
+
+  <h3>What it does for you</h3>
+  <ul>
+    <li><strong>Syncs orders</strong> from Shopify to PathXpress — automatically, by tag, or manually.</li>
+    <li><strong>Generates waybills &amp; labels</strong> ready to print from each shipment.</li>
+    <li><strong>Calculates shipping rates</strong> at checkout (dynamic or fixed rates).</li>
+    <li><strong>Tracks</strong> the status of every package with a full history.</li>
+    <li><strong>Reconciles COD</strong>: shows what is pending collection, collected and already remitted to you.</li>
+    <li><strong>Processes returns and exchanges</strong> approved in Shopify automatically.</li>
+    <li><strong>Rescues orders</strong> that failed to sync with one click.</li>
+  </ul>
+
+  <h3>The five main screens</h3>
+  <table class="doc-table">
+    <thead><tr><th>Screen</th><th>What it's for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Dashboard</strong></td><td>Today at a glance: shipments, packages in transit and pending COD, plus the list of your recent shipments.</td></tr>
+      <tr><td><strong>Orders</strong></td><td>List of Shopify orders to select and send to PathXpress (manual mode).</td></tr>
+      <tr><td><strong>Rescue</strong></td><td>Orders that didn't sync correctly; retry them one by one or force all at once.</td></tr>
+      <tr><td><strong>Settings</strong></td><td>Configuration: Client ID, sync mode, default service, free shipping and returns.</td></tr>
+      <tr><td><strong>COD</strong></td><td>Reconciliation of the cash collected on delivery.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===================== 02 PREREQUISITES ===================== -->
+<div class="page">
+  <span class="section-num">Section 02</span>
+  <h2>Prerequisites</h2>
+  <p>Before installing the app, make sure you have the following:</p>
+  <ul>
+    <li>An active <strong>Shopify store</strong> with admin permissions.</li>
+    <li>Your <strong>PathXpress Client ID</strong> (provided by the PathXpress team; you'll need it during setup).</li>
+    <li>For dynamic rates at checkout: a Shopify <strong>Advanced/Plus</strong> plan or the <em>“third-party calculated shipping rates”</em> add-on. On the Basic plan, the app offers fixed rates as an alternative.</li>
+  </ul>
+
+  <div class="tip">
+    <span class="ic">✓</span>
+    <div><span class="callout-title">Don't know your Client ID?</span>
+    Contact PathXpress support. Without a valid Client ID the app cannot create shipments.</div>
+  </div>
+
+  <h3>Permissions the app requests</h3>
+  <p>During installation, Shopify will ask you to authorize these scopes so the app can read orders and create shipments and returns:</p>
+  <table class="doc-table">
+    <thead><tr><th>Permission</th><th>Reason</th></tr></thead>
+    <tbody>
+      <tr><td><code>read_orders</code> / <code>write_orders</code></td><td>Read and update orders.</td></tr>
+      <tr><td><code>read_fulfillments</code> / <code>write_fulfillments</code></td><td>Create and update fulfillments.</td></tr>
+      <tr><td><code>read_shipping</code> / <code>write_shipping</code></td><td>Calculate and register shipping rates.</td></tr>
+      <tr><td><code>read_returns</code> / <code>write_returns</code></td><td>Process returns and exchanges.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ===================== 03 INSTALL ===================== -->
+<div class="page">
+  <span class="section-num">Section 03</span>
+  <h2>Install &amp; connect</h2>
+  <p class="lead">The first time you open the app inside Shopify, it isn't connected to your PathXpress account yet. You'll see this welcome screen:</p>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>admin.shopify.com/store/your-store/apps/pathxpress</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div class="px">
+        <header class="app-header">
+          <span class="app-header-logo-text">PATH<em>X</em>PRESS</span>
+          <div class="app-header-divider"></div>
+          <div class="app-header-shop">
+            <span class="app-header-shop-label">Shopify App</span>
+            <span class="app-header-shop-name">your-store.myshopify.com</span>
+          </div>
+          <div class="app-header-right">
+            <span class="badge-disconnected"><span class="badge-disconnected-dot"></span>Not connected</span>
+          </div>
+        </header>
+        <div class="app-nav-wrap">
+          <nav class="app-nav">
+            <a class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 21v-9"/></svg>Orders</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>Rescue</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a>
+          </nav>
+        </div>
+        <div class="app-main">
+          <div class="card-nop">
+            <div class="empty-hero">
+              <div class="ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
+              <h2>Connect your store</h2>
+              <p>Link your Shopify store to PathXpress to start creating shipments, printing labels and reconciling COD.</p>
+              <span class="btn-primary btn-primary-lg"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09zM12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/></svg>Connect now</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Initial screen — the store is not connected yet (“Not connected” badge).</figcaption>
+  </figure>
+</div>
+
+<div class="page">
+  <span class="section-num">Section 03 · steps</span>
+  <h2>Steps to connect</h2>
+  <ol class="steps">
+    <li><span class="st-title">Open the app in Shopify.</span> Go to <strong>Apps → PATHXPRESS Portal</strong> in your store admin.</li>
+    <li><span class="st-title">Click “Connect now”.</span> This starts Shopify's authorization (OAuth) flow.</li>
+    <li><span class="st-title">Authorize the permissions.</span> Shopify shows the list of scopes the app needs. Review and click <strong>Install</strong>.</li>
+    <li><span class="st-title">Done.</span> You return to the app and the badge changes to <strong>Connected</strong> (green dot). Now you can configure it.</li>
+  </ol>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>your-store.myshopify.com/admin/oauth/authorize</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div style="background:#F4F3EF;padding:30px;display:grid;place-items:center;">
+        <div style="background:#fff;border:1px solid rgba(20,22,26,.12);border-radius:14px;max-width:430px;width:100%;padding:26px 26px 22px;box-shadow:0 12px 36px -22px rgba(0,0,0,.4);font-family:'Hanken Grotesk',sans-serif;">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+            <div style="width:42px;height:42px;border-radius:10px;background:#16181C;display:grid;place-items:center;font-family:'Outfit';font-weight:800;font-size:13px;color:#fff;">P<span style="color:#E10600;">X</span></div>
+            <div>
+              <div style="font-family:'Outfit';font-weight:700;font-size:16px;">PATHXPRESS Portal</div>
+              <div style="font-size:12px;color:#6B6F77;">is requesting access to your store</div>
+            </div>
+          </div>
+          <div style="font-size:13px;color:#3C4046;margin-bottom:6px;font-weight:600;font-family:'Outfit';">This app will be able to:</div>
+          <ul style="margin:0 0 16px;padding-left:18px;font-size:13px;color:#3C4046;line-height:1.7;">
+            <li>View and edit orders</li>
+            <li>Manage fulfillments and shipping</li>
+            <li>Manage returns and exchanges</li>
+            <li>View and create shipping rates</li>
+          </ul>
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <span style="padding:9px 16px;border:1px solid rgba(20,22,26,.2);border-radius:8px;font-size:13px;font-weight:600;font-family:'Outfit';color:#16181C;">Cancel</span>
+            <span style="padding:9px 18px;border-radius:8px;background:#008060;color:#fff;font-size:13px;font-weight:600;font-family:'Outfit';">Install app</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Shopify's authorization (OAuth) screen — generated by Shopify, not by the app.</figcaption>
+  </figure>
+
+  <div class="note">
+    <span class="ic">i</span>
+    <div><span class="callout-title">Persistent connection</span>
+    Once connected, the app remembers the access even if you log out or the server restarts. You only repeat this step if you uninstall the app.</div>
+  </div>
+</div>
+
+<!-- ===================== 04 SETTINGS ===================== -->
+<div class="page">
+  <span class="section-num">Section 04</span>
+  <h2>Initial setup (Settings)</h2>
+  <p class="lead">After connecting, go to the <strong>Settings</strong> tab. This is where you define how PathXpress integrates with your store. It's the most important step.</p>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>admin.shopify.com/store/your-store/apps/pathxpress/app/settings</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div class="px">
+        <header class="app-header">
+          <span class="app-header-logo-text">PATH<em>X</em>PRESS</span>
+          <div class="app-header-divider"></div>
+          <div class="app-header-shop"><span class="app-header-shop-label">Shopify App</span><span class="app-header-shop-name">your-store.myshopify.com</span></div>
+          <div class="app-header-right"><span class="badge-connected"><span class="badge-connected-dot"></span>Connected</span></div>
+        </header>
+        <div class="app-nav-wrap">
+          <nav class="app-nav">
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 21v-9"/></svg>Orders</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>Rescue</a>
+            <a class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a>
+          </nav>
+        </div>
+        <div class="app-main">
+          <div class="page-title">Settings</div>
+          <div class="page-sub">Configure how PathXpress integrates with your Shopify store.</div>
+
+          <div class="card">
+            <div class="section-heading"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>PathXpress Connection</div>
+            <label>Client ID</label>
+            <div class="field mono" style="margin-top:8px;">10472</div>
+            <p class="field-help">Your client ID in the PathXpress portal. Contact support if you don't know it.</p>
+          </div>
+
+          <div class="card">
+            <div class="section-heading"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Order Sync Mode</div>
+            <div class="sync-mode-options">
+              <div class="sync-mode-option selected"><div class="radio-outer"><div class="radio-dot"></div></div><div class="sync-mode-label"><strong>⚡ Automatic</strong><span>All new orders are automatically sent to PathXpress when created in Shopify.</span></div></div>
+              <div class="sync-mode-option"><div class="radio-outer"><div class="radio-dot"></div></div><div class="sync-mode-label"><strong>🏷️ By Tag</strong><span>Only orders with the specified Shopify tag are synced automatically.</span></div></div>
+              <div class="sync-mode-option"><div class="radio-outer"><div class="radio-dot"></div></div><div class="sync-mode-label"><strong>✋ Manual</strong><span>Orders appear in the list. You choose which ones to send to PathXpress from the Orders page.</span></div></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="section-heading"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>Default Shipping Service</div>
+            <div class="field" style="justify-content:space-between;">DOM — Next Day (1-2 days)<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></div>
+            <p class="field-help">Default service applied to all orders from this store. Services shown are the ones enabled for your PathXpress account.</p>
+          </div>
+
+          <div class="card">
+            <div class="section-heading"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>Free Shipping Thresholds</div>
+            <p style="font-size:13px;color:#6B6F77;margin:0 0 14px;">Minimum order amount to offer free shipping. Leave empty to disable.</p>
+            <div class="grid-2">
+              <div><div class="field-label">Standard (DOM)</div><div class="field mono">200</div><p class="field-help">1-2 day delivery</p></div>
+              <div><div class="field-label">Express (Same Day)</div><div class="field mono">500</div><p class="field-help">Same day delivery</p></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="section-heading"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3"/></svg>Returns &amp; Exchanges</div>
+            <div class="checkbox-row"><div class="cbx"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></div><label style="cursor:pointer;">Automatically process approved returns &amp; exchanges</label></div>
+            <p class="field-help" style="margin-left:29px;">When enabled, returns approved in Shopify are automatically sent to PathXpress for pickup.</p>
+          </div>
+
+          <span class="btn-primary btn-primary-lg">Save Settings</span>
+        </div>
+      </div>
+    </div>
+    <figcaption>Full Settings screen — every configuration option.</figcaption>
+  </figure>
+</div>
+
+<!-- ===================== 04 field detail ===================== -->
+<div class="page">
+  <span class="section-num">Section 04 · detail</span>
+  <h2>Each option, explained</h2>
+
+  <h3>1 · PathXpress Connection — Client ID</h3>
+  <p>Enter the <strong>Client ID</strong> assigned to you by PathXpress. It identifies your account in the portal and is <strong>required</strong>: without it the app cannot create shipments or read your services.</p>
+
+  <h3>2 · Order Sync Mode</h3>
+  <p>Defines when Shopify orders are sent to PathXpress. Pick one:</p>
+  <table class="doc-table">
+    <thead><tr><th>Mode</th><th>Behavior</th><th>Best for</th></tr></thead>
+    <tbody>
+      <tr><td><strong>⚡ Automatic</strong></td><td>Every new order is sent to PathXpress automatically when it's created in Shopify.</td><td>Stores that ship every order with PathXpress.</td></tr>
+      <tr><td><strong>🏷️ By Tag</strong></td><td>Only orders that have a specific Shopify <strong>tag</strong> (e.g. <code>send_pathxpress</code>) are synced.</td><td>Stores using several couriers.</td></tr>
+      <tr><td><strong>✋ Manual</strong></td><td>Orders appear in the <strong>Orders</strong> tab and you choose which to send.</td><td>Full control, order by order.</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><span class="ic">i</span><div><span class="callout-title">“By Tag” mode</span>When you choose this mode an extra field appears to type the exact tag. Only orders with that tag sync automatically.</div></div>
+
+  <h3>3 · Default Shipping Service</h3>
+  <p>The courier service applied to all orders from this store (for example <strong>DOM</strong> next-day 1–2 days, <strong>SDD</strong> same day, <strong>BULLET</strong> 4 hours). The list shows only the services enabled for your PathXpress account.</p>
+
+  <h3>4 · Free Shipping Thresholds</h3>
+  <p>Minimum order amount to offer free shipping. There are two boxes: <strong>Standard (DOM)</strong> and <strong>Express (same day)</strong>. Leave a box empty to disable free shipping for that service.</p>
+
+  <h3>5 · Returns &amp; Exchanges</h3>
+  <p>If you tick the box, when you approve a return or exchange in Shopify it is automatically sent to PathXpress to schedule the pickup.</p>
+
+  <div class="tip"><span class="ic">✓</span><div><span class="callout-title">Don't forget to save</span>Click <strong>Save Settings</strong> when finished. A green confirmation message appears at the top.</div></div>
+
+  <figure style="margin-top:14px;">
+    <div class="px" style="border:1px solid rgba(20,22,26,.12);border-radius:12px;padding:16px;background:#F4F3EF;">
+      <div class="feedback-box feedback-success" style="margin:0;">✓ Settings saved successfully.</div>
+    </div>
+    <figcaption>Confirmation message after saving.</figcaption>
+  </figure>
+</div>
+
+<!-- ===================== 05 CARRIER / RATES ===================== -->
+<div class="page">
+  <span class="section-num">Section 05</span>
+  <h2>Checkout shipping rates</h2>
+  <p class="lead">So your customers see the PathXpress shipping cost at checkout, the app automatically registers a carrier service named <strong>PathXpress Shipping</strong> in your store.</p>
+
+  <p>If your Shopify plan does <strong>not</strong> have “third-party calculated rates” enabled, the Dashboard shows this notice with two options:</p>
+
+  <figure>
+    <div class="px" style="border:1px solid rgba(20,22,26,.12);border-radius:12px;padding:20px;background:#F4F3EF;">
+      <div class="warn-card">
+        <h3><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Carrier Calculated Shipping Not Enabled</h3>
+        <p style="color:#3C4046;margin:0 0 14px;font-size:13.5px;">Your store does not have “Third-party calculated shipping rates” enabled. Dynamic rates will not work.</p>
+        <p style="color:#6B6F77;margin:0;font-size:13px;"><strong style="color:#16181C;">Option 1 (Dynamic Rates):</strong> Enable “Third-party calculated rates” in Settings → Shipping. <em>Requires Advanced/Plus plan or add-on.</em></p>
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(20,22,26,.1);">
+          <p style="margin:0 0 8px;font-weight:700;color:#16181C;font-size:13.5px;font-family:'Outfit';">Option 2 (Basic Plan): Use Fixed Rates</p>
+          <p style="color:#3C4046;font-size:13px;margin:0 0 12px;">Automatically configure flat rates for UAE (Standard: 15 AED, Express: 25 AED).</p>
+          <span class="btn-primary" style="background:#16181C;">Create Fixed Rates</span>
+        </div>
+      </div>
+    </div>
+    <figcaption>Rates notice shown when the plan doesn't support dynamic rates.</figcaption>
+  </figure>
+
+  <h3>Option 1 — Dynamic rates (recommended)</h3>
+  <p>In Shopify go to <strong>Settings → Shipping and delivery</strong> and enable <em>“Third-party calculated rates”</em>. This requires an Advanced/Plus plan or the matching add-on. With it, the checkout asks PathXpress for the real cost based on destination, weight and service.</p>
+
+  <h3>Option 2 — Fixed rates (Basic plan)</h3>
+  <p>On the Basic plan, click <strong>Create Fixed Rates</strong>. The app automatically creates a UAE shipping zone in Shopify with flat rates (Standard 15 AED, Express 25 AED). You can adjust them later from Shopify's shipping settings.</p>
+
+  <div class="warn"><span class="ic">!</span><div><span class="callout-title">Don't see the notice?</span>It means rates are already working. The notice only appears when rate calculation still needs to be enabled.</div></div>
+</div>
+
+<!-- ===================== 06 DASHBOARD ===================== -->
+<div class="page">
+  <span class="section-num">Section 06</span>
+  <h2>The Dashboard</h2>
+  <p class="lead">This is the home screen once the store is connected. It shows the day's shipping activity at a glance and the list of your recent shipments.</p>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>admin.shopify.com/store/your-store/apps/pathxpress/app</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div class="px">
+        <header class="app-header">
+          <span class="app-header-logo-text">PATH<em>X</em>PRESS</span>
+          <div class="app-header-divider"></div>
+          <div class="app-header-shop"><span class="app-header-shop-label">Shopify App</span><span class="app-header-shop-name">your-store.myshopify.com</span></div>
+          <div class="app-header-right"><span class="badge-connected"><span class="badge-connected-dot"></span>Connected</span></div>
+        </header>
+        <div class="app-nav-wrap">
+          <nav class="app-nav">
+            <a class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 21v-9"/></svg>Orders</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>Rescue<span class="nav-badge">3</span></a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Settings</a>
+          </nav>
+        </div>
+        <div class="app-main">
+          <div class="page-title">Dashboard</div>
+          <div class="page-sub">Your PathXpress shipping activity at a glance.</div>
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-top"><span class="kpi-label">Shipments today</span><span class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/></svg></span></div>
+              <div class="kpi-val">12</div><div class="kpi-sub">shipments created today</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-top"><span class="kpi-label">Active shipments</span><span class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h11v8H3zM14 10h4l3 3v2h-7z"/><circle cx="6.5" cy="16.5" r="1.5"/><circle cx="17.5" cy="16.5" r="1.5"/></svg></span></div>
+              <div class="kpi-val">47</div><div class="kpi-sub">in transit across the network</div>
+            </div>
+            <div class="kpi-card band">
+              <div class="bigx">X</div>
+              <div class="kpi-top"><span class="kpi-label">Pending COD</span><span class="kpi-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/></svg></span></div>
+              <div class="kpi-val">AED 8,450</div><div class="kpi-sub">View reconciliation →</div>
+            </div>
+          </div>
+          <div class="card-nop">
+            <div class="card-header">
+              <div><h3 class="card-header-title">My PathXpress shipments</h3><div class="card-header-sub">Latest movements from your store</div></div>
+              <span class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Manage orders</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:14px 18px 8px;flex-wrap:wrap;">
+              <div class="filter-tabs"><span class="filter-tab active">All</span><span class="filter-tab">Shipments</span><span class="filter-tab">Returns</span><span class="filter-tab">Exchanges</span></div>
+              <div class="search-wrap" style="flex:1;min-width:160px;max-width:280px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Search order # or waybill…</span></div>
+            </div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Order #</th><th>Waybill</th><th>Type</th><th>Status</th><th>COD</th><th>Date</th><th>Actions</th></tr></thead>
+              <tbody>
+                <tr><td><strong>#1005</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883471</span></td><td><span class="badge blue">Shipment</span></td><td><span class="badge amber">PENDING_PICKUP</span></td><td><span style="color:#B5790A;font-weight:600;">320 AED</span></td><td>25/06/2026</td><td><div style="display:flex;gap:8px;"><span class="print-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print Label</span><span class="btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Track</span></div></td></tr>
+                <tr><td><strong>#1004</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883470</span></td><td><span class="badge blue">Shipment</span></td><td><span class="badge blue">IN_TRANSIT</span></td><td><span style="color:#6B6F77;">---</span></td><td>25/06/2026</td><td><div style="display:flex;gap:8px;"><span class="print-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print Label</span><span class="btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Track</span></div></td></tr>
+                <tr><td><strong>#1003</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883468</span></td><td><span class="badge red">Return</span></td><td><span class="badge green">DELIVERED</span></td><td><span style="color:#6B6F77;">---</span></td><td>24/06/2026</td><td><div style="display:flex;gap:8px;"><span class="print-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print Label</span><span class="btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Track</span></div></td></tr>
+                <tr><td><strong>#1002</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883465</span></td><td><span class="badge amber">Exchange</span></td><td><span class="badge green">DELIVERED</span></td><td><span style="color:#B5790A;font-weight:600;">150 AED</span></td><td>24/06/2026</td><td><div style="display:flex;gap:8px;"><span class="print-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Print Label</span><span class="btn-sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Track</span></div></td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Dashboard with the store connected — KPIs and recent shipments.</figcaption>
+  </figure>
+
+  <h3>What you see on the Dashboard</h3>
+  <ul>
+    <li><strong>Shipments today</strong> — shipments created today.</li>
+    <li><strong>Active shipments</strong> — packages in transit across the network.</li>
+    <li><strong>Pending COD</strong> (dark card) — money pending collection; click it to go to COD reconciliation.</li>
+    <li><strong>My PathXpress shipments</strong> — shipments table with filters (All / Shipments / Returns / Exchanges) and a search box by order # or waybill.</li>
+  </ul>
+  <p>Each row shows the order number, the waybill, the type, the status, the COD, the date, and actions: <strong>Print Label</strong> and <strong>Track</strong>. Orders not yet picked up also show a delete button.</p>
+</div>
+
+<!-- ===================== 07 ORDERS ===================== -->
+<div class="page">
+  <span class="section-num">Section 07</span>
+  <h2>Order management (Orders)</h2>
+  <p class="lead">Here you choose which Shopify orders to send to PathXpress. It's the key screen for <strong>Manual</strong> mode, though you can also use it to sync individual orders in any mode.</p>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>admin.shopify.com/store/your-store/apps/pathxpress/app/orders</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div class="px">
+        <header class="app-header">
+          <span class="app-header-logo-text">PATH<em>X</em>PRESS</span>
+          <div class="app-header-divider"></div>
+          <div class="app-header-shop"><span class="app-header-shop-label">Shopify App</span><span class="app-header-shop-name">your-store.myshopify.com</span></div>
+          <div class="app-header-right"><span class="badge-connected"><span class="badge-connected-dot"></span>Connected</span></div>
+        </header>
+        <div class="app-nav-wrap">
+          <nav class="app-nav">
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</a>
+            <a class="active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 21v-9"/></svg>Orders</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>Rescue</a>
+            <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>Settings</a>
+          </nav>
+        </div>
+        <div class="app-main">
+          <div class="page-title">Order Management</div>
+          <div class="page-sub">Select the orders you want to send to PathXpress.</div>
+          <div class="banner-blue" style="width:max-content;max-width:100%;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2A6FDB" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+            <span>Sync mode: <strong style="font-family:'Outfit';">Manual</strong></span><span style="color:rgba(20,22,26,.2);">·</span><span style="color:#E10600;font-weight:600;font-family:'Outfit';">Change</span>
+          </div>
+          <div class="toolbar">
+            <span class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>Sync Selected (2)</span>
+            <span style="font-size:13px;display:flex;align-items:center;gap:6px;"><span class="cbx empty" style="width:16px;height:16px;"></span> Select all pending</span>
+            <div class="search-wrap" style="flex:1;min-width:160px;max-width:260px;margin-left:auto;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>Search order or customer…</span></div>
+          </div>
+          <div class="card" style="padding:6px;">
+            <table>
+              <thead><tr><th></th><th>Order</th><th>Customer</th><th>Date</th><th>Total</th><th>Pcs</th><th>Status</th><th>Result</th></tr></thead>
+              <tbody>
+                <tr><td><span class="cbx" style="width:17px;height:17px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span></td><td><strong>#1008</strong></td><td>Aisha Al Maktoum</td><td>25/06/2026</td><td>450.00 AED</td><td>2</td><td><span class="badge pending">Pending</span></td><td></td></tr>
+                <tr><td><span class="cbx" style="width:17px;height:17px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span></td><td><strong>#1007</strong></td><td>Omar Hassan</td><td>25/06/2026</td><td>120.00 AED</td><td>1</td><td><span class="badge pending">Pending</span></td><td></td></tr>
+                <tr><td></td><td><strong>#1006</strong></td><td>Layla Ahmed</td><td>24/06/2026</td><td>600.00 AED</td><td>3</td><td><span class="badge synced">&#10003; PX-AE-883462</span></td><td></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="toolbar" style="margin-top:6px;">
+            <span class="btn-outline"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Find All Unsynced Orders</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Order Management — two orders selected, ready to sync.</figcaption>
+  </figure>
+
+  <h3>How to send orders to PathXpress</h3>
+  <ol class="steps">
+    <li><span class="st-title">Open the Orders tab.</span> You'll see your store's orders. The blue strip shows the active sync mode (with a <strong>Change</strong> link to Settings).</li>
+    <li><span class="st-title">Select the orders.</span> Tick the <em>Pending</em> orders, or use <strong>Select all pending</strong>. Already-synced orders show their waybill and have no checkbox.</li>
+    <li><span class="st-title">Click “Sync Selected (n)”.</span> The button shows how many you'll send. Depending on your setup, it may ask you to pick the service applied to all of them.</li>
+    <li><span class="st-title">Check the result.</span> Each row turns <strong>Synced</strong> with its waybill number in the Status column.</li>
+  </ol>
+
+  <div class="tip"><span class="ic">✓</span><div><span class="callout-title">Missing orders in the list?</span>Use <strong>Find All Unsynced Orders</strong> so the app scans your whole store for orders not yet sent to PathXpress.</div></div>
+</div>
+
+<!-- ===================== 08 WAYBILL ===================== -->
+<div class="page">
+  <span class="section-num">Section 08</span>
+  <h2>Labels &amp; waybills</h2>
+  <p class="lead">Every synced shipment generates a waybill number and a label ready to print and stick on the package.</p>
+
+  <h3>Printing a label</h3>
+  <ol class="steps">
+    <li><span class="st-title">Find the shipment.</span> On the <strong>Dashboard</strong> (“My PathXpress shipments” table) search by order number or waybill.</li>
+    <li><span class="st-title">Click “Print Label”.</span> The app opens the official waybill PDF generated by the PathXpress portal in a new tab.</li>
+    <li><span class="st-title">Print and attach.</span> The PDF includes the barcode / QR with the shipment data for route scanning.</li>
+  </ol>
+
+  <div class="note"><span class="ic">i</span><div><span class="callout-title">Official label</span>The label comes directly from the PathXpress portal (single source of truth). If the portal is momentarily unavailable, the app generates an equivalent fallback label in the browser.</div></div>
+
+  <div class="warn"><span class="ic">!</span><div><span class="callout-title">Is “Print Label” disabled?</span>It means the shipment doesn't have a waybill yet (status “Pending”). Wait until the sync with PathXpress completes.</div></div>
+</div>
+
+<!-- ===================== 09 TRACKING ===================== -->
+<div class="page">
+  <span class="section-num">Section 09</span>
+  <h2>Shipment tracking</h2>
+  <p class="lead">From any shipment you can click <strong>Track</strong> to see its current status and the full history of movements.</p>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>.../app/orders/PX-AE-883471/tracking</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div class="px">
+        <div class="app-main">
+          <div class="page-title">Tracking</div>
+          <div class="page-sub">Waybill <strong style="font-family:'Space Mono';">PX-AE-883471</strong> · Order #1005</div>
+          <div class="card">
+            <div class="sumrow"><span>Current status</span><span><span class="badge amber">OUT FOR DELIVERY</span></span></div>
+            <div class="sumrow"><span>Service</span><span>DOM — Next Day</span></div>
+            <div class="sumrow"><span>Recipient</span><span>Aisha Al Maktoum</span></div>
+            <div class="sumrow"><span>Destination</span><span>Dubai, United Arab Emirates</span></div>
+            <div class="sumrow"><span>COD</span><span>AED 320.00</span></div>
+            <div class="sumrow"><span>Created</span><span>25/06/2026 09:12</span></div>
+          </div>
+          <div class="card">
+            <h3 style="font-family:'Outfit';font-weight:600;font-size:16px;margin:0 0 18px;">Tracking history</h3>
+            <div class="timeline">
+              <div class="ev current"><div class="ev-title">Out for delivery</div><div class="ev-meta">25/06/2026 14:40 · Dubai hub</div></div>
+              <div class="ev done"><div class="ev-title">In transit</div><div class="ev-meta">25/06/2026 11:05 · Dubai sorting center</div></div>
+              <div class="ev done"><div class="ev-title">Picked up</div><div class="ev-meta">25/06/2026 10:20 · Merchant warehouse</div></div>
+              <div class="ev done"><div class="ev-title">Shipment created</div><div class="ev-meta">25/06/2026 09:12 · PathXpress</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Tracking screen — shipment summary and history.</figcaption>
+  </figure>
+
+  <p>The top section summarizes the <strong>current status</strong>, the service, the recipient, the destination, the COD (if any) and the creation date. Below, the timeline shows each movement: created, picked up, in transit, out for delivery and delivered.</p>
+</div>
+
+<!-- ===================== 10 COD ===================== -->
+<div class="page">
+  <span class="section-num">Section 10</span>
+  <h2>COD reconciliation</h2>
+  <p class="lead">COD (Cash on Delivery) is the money the courier collects from your customer on delivery and then remits to you. This screen shows the status of that money.</p>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>admin.shopify.com/store/your-store/apps/pathxpress/app/cod</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div class="px">
+        <div class="app-main">
+          <div class="page-title">COD reconciliation</div>
+          <div class="page-sub">Cash-on-delivery collected on your behalf and remitted to your account.</div>
+          <div class="kpi-grid">
+            <div class="kpi-card"><div class="kpi-label">Pending collection</div><div class="kpi-val">AED 8,450</div><div class="kpi-sub">14 shipments out for COD</div></div>
+            <div class="kpi-card"><div class="kpi-label">Collected (to remit)</div><div class="kpi-val">AED 3,120</div><div class="kpi-sub">6 collected, awaiting remittance</div></div>
+            <div class="kpi-card band"><div class="bigx">X</div><div class="kpi-label">Remitted to you</div><div class="kpi-val">AED 21,900</div><div class="kpi-sub">48 settled</div></div>
+          </div>
+          <div class="card-nop">
+            <div class="card-header"><h3 class="card-header-title">COD records</h3></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Order</th><th>Waybill</th><th>Customer</th><th>Amount</th><th>Status</th><th>Collected</th><th>Remitted</th></tr></thead>
+              <tbody>
+                <tr><td><strong>#1005</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883471</span></td><td>Aisha Al Maktoum</td><td><strong>AED 320.00</strong></td><td><span class="badge amber">pending_collection</span></td><td>—</td><td>—</td></tr>
+                <tr><td><strong>#1003</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883468</span></td><td>Omar Hassan</td><td><strong>AED 150.00</strong></td><td><span class="badge blue">collected</span></td><td>24/06/2026</td><td>—</td></tr>
+                <tr><td><strong>#1001</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883455</span></td><td>Sara Khalifa</td><td><strong>AED 280.00</strong></td><td><span class="badge green">remitted</span></td><td>22/06/2026</td><td>24/06/2026</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>COD reconciliation — totals and per-shipment record.</figcaption>
+  </figure>
+
+  <h3>The three states of the money</h3>
+  <ul>
+    <li><strong>Pending collection</strong> — the package is out for delivery but the customer hasn't paid yet.</li>
+    <li><strong>Collected (to remit)</strong> — already collected from the customer; awaiting PathXpress to remit it to you.</li>
+    <li><strong>Remitted to you</strong> — the money is already settled in your account.</li>
+  </ul>
+  <p>The table details each shipment with its amount, status and the collection and remittance dates. It's a <strong>read-only</strong> view for reconciliation; the courier's events keep it updated.</p>
+</div>
+
+<!-- ===================== 11 RESCUE ===================== -->
+<div class="page">
+  <span class="section-num">Section 11</span>
+  <h2>Rescue stuck orders</h2>
+  <p class="lead">Sometimes an order is created in PathXpress but isn't reflected correctly in Shopify (the fulfillment isn't marked, or the “delivered” event wasn't sent). The <strong>Rescue</strong> tab detects them and lets you retry.</p>
+
+  <figure>
+    <div class="browser">
+      <div class="browser-bar">
+        <div class="browser-dots"><i></i><i></i><i></i></div>
+        <div class="browser-url"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#6B6F77" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>admin.shopify.com/store/your-store/apps/pathxpress/app/stuck-orders</div>
+        <span class="shopify-chip">Shopify Admin</span>
+      </div>
+      <div class="px">
+        <div class="app-main">
+          <div class="page-title">Rescue orders</div>
+          <div class="page-sub">Orders that could not be synced to Shopify. Retry individually or force all at once.</div>
+          <div class="banner-red">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E10600" stroke-width="1.8" style="flex:none;"><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></svg>
+            <div><strong style="font-family:'Outfit';">3 orders</strong> need attention and could not be automatically synced.</div>
+          </div>
+          <div class="toolbar">
+            <span class="btn-primary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>Force ALL (fulfillment + delivered)</span>
+            <span class="btn-outline"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Send "delivered" only</span>
+            <span style="margin-left:auto;color:#6B6F77;font-size:13px;font-family:'Outfit';font-weight:600;">← Back to dashboard</span>
+          </div>
+          <div class="card-nop" style="margin-bottom:16px;">
+            <div class="card-header"><div><h3 class="card-header-title">Without Shopify fulfillment</h3><div class="card-header-sub">2 orders pending</div></div><span class="badge amber">2</span></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Order</th><th>Waybill</th><th>Portal status</th><th>Last sync</th><th>Date</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><strong>#1009</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883480</span></td><td><span class="badge blue">IN_TRANSIT</span></td><td>—</td><td>25/06/2026</td><td><span class="btn-sm">Retry</span></td></tr>
+                <tr><td><strong>#1010</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883481</span></td><td><span class="badge amber">PENDING_PICKUP</span></td><td>—</td><td>25/06/2026</td><td><span class="btn-sm">Retry</span></td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <div class="card-nop">
+            <div class="card-header"><div><h3 class="card-header-title">Fulfilled but "Delivered" not sent</h3><div class="card-header-sub">1 order pending</div></div><span class="badge red">1</span></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Order</th><th>Waybill</th><th>Portal status</th><th>Last sync</th><th>Date</th><th></th></tr></thead>
+              <tbody>
+                <tr><td><strong>#1002</strong></td><td><span style="color:#2A6FDB;font-weight:600;font-family:'Space Mono';">PX-AE-883465</span></td><td><span class="badge green">DELIVERED</span></td><td>24/06/2026</td><td>24/06/2026</td><td><span class="btn-sm">Retry</span></td></tr>
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Rescue orders — two groups of orders that need attention.</figcaption>
+  </figure>
+
+  <h3>How to use it</h3>
+  <ul>
+    <li><strong>Without Shopify fulfillment</strong> — orders with a waybill in PathXpress but no fulfillment in Shopify.</li>
+    <li><strong>Fulfilled but “Delivered” not sent</strong> — already fulfilled, but the delivery event is missing.</li>
+    <li><strong>Force ALL</strong> — retries everything (fulfillment + delivered) at once.</li>
+    <li><strong>Send “delivered” only</strong> — only resends the delivery event.</li>
+    <li><strong>Retry</strong> (per row) — retries a single order.</li>
+  </ul>
+  <p>The number next to <strong>Rescue</strong> in the navigation shows how many orders need attention. Ideally, keep it at zero.</p>
+</div>
+
+<!-- ===================== 12 FAQ ===================== -->
+<div class="page">
+  <span class="section-num">Section 12</span>
+  <h2>FAQ &amp; troubleshooting</h2>
+
+  <h4>The app says “Not connected”. What do I do?</h4>
+  <p>Click <strong>Connect now</strong> on the Dashboard and complete Shopify's authorization. If you'd already connected it, reopen the app from <strong>Apps</strong> in your admin.</p>
+
+  <h4>I saved the Client ID but no shipments are created.</h4>
+  <p>Check that the Client ID is correct and that your PathXpress account is active. Confirm with PathXpress support. Also review the sync mode in <strong>Settings</strong>.</p>
+
+  <h4>My customers don't see the shipping cost at checkout.</h4>
+  <p>You need to enable rates (Section 05). On Advanced/Plus enable <em>third-party calculated rates</em>; on Basic use <strong>Create Fixed Rates</strong>.</p>
+
+  <h4>I chose “Automatic” mode but an order wasn't sent.</h4>
+  <p>Go to <strong>Rescue</strong> and retry, or open <strong>Orders</strong> and use <strong>Find All Unsynced Orders</strong> to sync it manually.</p>
+
+  <h4>Can I change the service or mode later?</h4>
+  <p>Yes. Everything is adjustable in <strong>Settings</strong> at any time; remember to click <strong>Save Settings</strong>.</p>
+
+  <h4>Do I collect the COD myself?</h4>
+  <p>No. The courier collects it on delivery and then remits it to you. The <strong>COD</strong> screen is for reconciliation (pending, collected, remitted).</p>
+
+  <hr>
+  <h3>Recommended end-to-end flow</h3>
+  <ol class="steps">
+    <li><span class="st-title">Install &amp; connect</span> the app (Connect now → authorize in Shopify).</li>
+    <li><span class="st-title">Configure</span> in Settings: Client ID, sync mode, default service, free shipping and returns. Save.</li>
+    <li><span class="st-title">Enable shipping rates</span> (dynamic or fixed) if you charge for shipping at checkout.</li>
+    <li><span class="st-title">Operate daily</span>: sync orders (auto/tag/manual), print labels and track.</li>
+    <li><span class="st-title">Reconcile COD</span> and <span class="st-title">check Rescue</span> regularly so nothing gets stuck.</li>
+  </ol>
+
+  <div class="tip" style="margin-top:24px;"><span class="ic">✓</span><div><span class="callout-title">Need help?</span>For questions about your account, Client ID, services or COD settlement, contact PathXpress support.</div></div>
+
+  <p style="text-align:center;color:#9CA0A8;font-family:'Space Mono',monospace;font-size:12px;margin-top:40px;">PATHXPRESS Portal · User &amp; Setup Guide · June 2026</p>
+</div>
+
+</body>
+</html>

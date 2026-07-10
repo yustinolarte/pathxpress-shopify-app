@@ -47,6 +47,13 @@ db.getConnection()
         } catch (e) {
             console.warn("⚠️ Migración auto_returns:", e.message);
         }
+        // Migración: agregar columna default_cod_method para CCOD
+        try {
+            await conn.execute(`ALTER TABLE shopify_shops ADD COLUMN IF NOT EXISTS default_cod_method VARCHAR(10) NOT NULL DEFAULT 'cash'`);
+            console.log("✅ Migración: columna default_cod_method verificada.");
+        } catch (e) {
+            console.warn("⚠️ Migración default_cod_method:", e.message);
+        }
         conn.release();
     })
     .catch(err => {
@@ -218,6 +225,7 @@ async function saveShipmentToOrdersTable(shipment) {
         codRequired,
         codAmount,
         codCurrency,
+        codPaymentMethod,
         pickupDate,
         deliveryDateEstimated,
         deliveryDateReal,
@@ -231,7 +239,7 @@ async function saveShipmentToOrdersTable(shipment) {
         routeBatchId,
         createdAt,
         updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 // client / identificación
                 shipment.clientId,
@@ -271,6 +279,7 @@ async function saveShipmentToOrdersTable(shipment) {
                 shipment.codRequired ? 1 : 0,
                 shipment.codAmount || 0,
                 shipment.codCurrency || "AED",
+                shipment.codPaymentMethod || null,
 
                 // fechas y estado
                 shipment.pickupDate
@@ -330,14 +339,16 @@ async function saveShipmentToOrdersTable(shipment) {
                         shipmentId,
                         codAmount,
                         codCurrency,
+                        allowedMethods,
                         status,
                         createdAt,
                         updatedAt
-                    ) VALUES (?, ?, ?, ?, ?, ?)`,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
                     [
                         insertedOrderId,
                         shipment.codAmount,
                         shipment.codCurrency || "AED",
+                        shipment.codPaymentMethod || "cash",
                         "pending_collection", // Estado inicial
                         new Date(),
                         new Date()
@@ -2910,7 +2921,7 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
         return res.status(401).json({ success: false, message: "Unauthorized: Missing shop or valid session." });
     }
 
-    const { clientId, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_dom, free_shipping_express, auto_returns } = req.body;
+    const { clientId, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_dom, free_shipping_express, auto_returns, default_cod_method } = req.body;
 
     if (!clientId) {
         return res.status(400).json({ success: false, message: "Error: Missing Client ID." });
@@ -2929,12 +2940,15 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     const freeShippingExpressValue = free_shipping_express && parseFloat(free_shipping_express) > 0
         ? parseFloat(free_shipping_express)
         : null;
+    // COD payment method: cash, card, or any (default: cash)
+    const validCodMethods = ['cash', 'card', 'any'];
+    const resolvedCodMethod = validCodMethods.includes(default_cod_method) ? default_cod_method : 'cash';
 
     try {
         // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_threshold_dom, free_shipping_threshold_express)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_threshold_dom, free_shipping_threshold_express, default_cod_method)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 pathxpress_client_id = VALUES(pathxpress_client_id),
                 default_service_type = VALUES(default_service_type),
@@ -2943,10 +2957,11 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
                 sync_mode = VALUES(sync_mode),
                 free_shipping_threshold_dom = VALUES(free_shipping_threshold_dom),
                 free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
+                default_cod_method = VALUES(default_cod_method),
                 updated_at = CURRENT_TIMESTAMP`,
-            [shop, clientId, serviceType, isAutoSync, sync_tag || null, resolvedSyncMode, freeShippingDOMValue, freeShippingExpressValue]
+            [shop, clientId, serviceType, isAutoSync, sync_tag || null, resolvedSyncMode, freeShippingDOMValue, freeShippingExpressValue, resolvedCodMethod]
         );
-        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, SyncMode = ${resolvedSyncMode}, AutoReturns = ${isAutoReturns}`);
+        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, SyncMode = ${resolvedSyncMode}, AutoReturns = ${isAutoReturns}, CodMethod = ${resolvedCodMethod}`);
 
         // Return JSON success
         res.json({ success: true, message: "Settings saved successfully" });
@@ -2975,6 +2990,7 @@ app.get("/app/settings", requireSessionToken, async (req, res) => {
     const freeShippingDOM = shopData.free_shipping_threshold_dom || "";
     const freeShippingExpress = shopData.free_shipping_threshold_express || "";
     const currentAutoReturns = shopData.auto_returns !== 0;
+    const currentCodMethod = shopData.default_cod_method || "cash";
 
     const escHtml = s => String(s == null ? "" : s)
         .replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -2988,7 +3004,9 @@ app.get("/app/settings", requireSessionToken, async (req, res) => {
     // Falls back to a static list if the portal is unreachable / not configured.
     let serviceOptionsHtml = "";
     try {
-        const portalServices = await fetchPortalServices(currentClientId, {});
+        const portalRes = await fetchPortalServices(currentClientId, {});
+        const portalServices = portalRes.services || [];
+        var ccodEnabled = portalRes.clientSettings?.cardOnDeliveryAllowed === true;
         const usable = portalServices.filter(s => s.available && !s.requiresScheduling);
         if (usable.length) {
             serviceOptionsHtml = usable.map(s =>
@@ -3278,6 +3296,39 @@ app.get("/app/settings", requireSessionToken, async (req, res) => {
             <p class="field-help" style="margin-left:28px;">When enabled, returns approved in Shopify are automatically sent to PathXpress for pickup.</p>
         </div>
 
+        <!-- COD PAYMENT METHOD -->
+        <div class="card">
+            <div class="section-heading">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                COD Payment Method
+            </div>
+            <p style="font-size:13px;color:var(--muted);margin-bottom:16px;">Choose how customers pay for Cash on Delivery orders. Card options require CCOD to be enabled in your PathXpress account.</p>
+            <input type="hidden" name="default_cod_method" id="codMethodInput" value="${escHtml(currentCodMethod)}" />
+            <div class="sync-option ${currentCodMethod === 'cash' ? 'selected' : ''}" onclick="setCodMethod('cash')">
+                <span class="radio-outer"><span class="radio-dot"></span></span>
+                <div style="flex:1;">
+                    <span style="font-family:var(--font-display);font-weight:600;font-size:14px;">💵 Cash on Delivery</span>
+                    <span style="display:block;font-size:12.5px;color:var(--muted);margin-top:2px;">Customer pays cash to the driver at the door.</span>
+                </div>
+            </div>
+            <div class="sync-option ${currentCodMethod === 'card' && ccodEnabled ? 'selected' : ''}" onclick="setCodMethod('card')" ${!ccodEnabled ? 'style="opacity:0.5; pointer-events:none;"' : ''}>
+                <span class="radio-outer"><span class="radio-dot"></span></span>
+                <div style="flex:1;">
+                    <span style="font-family:var(--font-display);font-weight:600;font-size:14px;">💳 Card on Delivery</span>
+                    <span style="display:block;font-size:12.5px;color:var(--muted);margin-top:2px;">Customer pays by card via Tap to Pay on driver's phone.</span>
+                </div>
+            </div>
+            <div class="sync-option ${currentCodMethod === 'any' && ccodEnabled ? 'selected' : ''}" onclick="setCodMethod('any')" ${!ccodEnabled ? 'style="opacity:0.5; pointer-events:none;"' : ''}>
+                <span class="radio-outer"><span class="radio-dot"></span></span>
+                <div style="flex:1;">
+                    <span style="font-family:var(--font-display);font-weight:600;font-size:14px;">💵💳 Cash or Card</span>
+                    <span style="display:block;font-size:12.5px;color:var(--muted);margin-top:2px;">Customer decides at the door — accepts either method.</span>
+                </div>
+            </div>
+            ${!ccodEnabled ? '<p style="color:var(--accent);font-size:12px;margin-top:8px;">⚠️ Card options are disabled because CCOD is not enabled in your PathXpress account.</p>' : ''}
+            <p class="field-help">This sets the default for all COD orders. You can override per-batch when using manual sync.</p>
+        </div>
+
         <button type="submit" class="btn-primary btn-primary-lg">Save Settings</button>
     </form>
 
@@ -3292,6 +3343,15 @@ app.get("/app/settings", requireSessionToken, async (req, res) => {
                 selected.closest('.sync-mode-option').classList.add('selected');
             }
             document.getElementById('tagFieldWrapper').style.display = (mode === 'tag') ? '' : 'none';
+        }
+
+        function setCodMethod(method) {
+            // Deselect all COD method options within the COD Payment Method card
+            var card = document.getElementById('codMethodInput').closest('.card');
+            card.querySelectorAll('.sync-option').forEach(function(el) { el.classList.remove('selected'); });
+            // Select the clicked one (find by onclick text match)
+            event.currentTarget.classList.add('selected');
+            document.getElementById('codMethodInput').value = method;
         }
 
         async function getToken() {
@@ -3447,7 +3507,9 @@ app.get("/api/services", requireSessionToken, async (req, res) => {
 
         let services = [];
         try {
-            const portalServices = await fetchPortalServices(clientId, {});
+            const portalRes = await fetchPortalServices(clientId, {});
+            const portalServices = portalRes.services || [];
+            var ccodEnabled = portalRes.clientSettings?.cardOnDeliveryAllowed === true;
             services = portalServices
                 .filter(s => s.available && !s.requiresScheduling)
                 .map(s => ({ code: s.code, displayName: s.displayName, deliveryTime: s.deliveryTime || null }));
@@ -3461,7 +3523,7 @@ app.get("/api/services", requireSessionToken, async (req, res) => {
             ];
         }
 
-        res.json({ services, default: defaultService });
+        res.json({ services, default: defaultService, ccodEnabled });
     } catch (err) {
         console.error("⛔ Error fetching available services:", err);
         res.status(500).json({ error: "Internal server error" });
@@ -3609,7 +3671,8 @@ app.post("/api/shipping-rates", async (req, res) => {
 
             // Send the full emirate NAME (not Shopify's "DU"/"RK" code) so the
             // portal resolves the correct zone/price and applies per-service region rules.
-            const portalServices = await fetchPortalServices(clientId, { emirate: emirateName(emirateRaw), weight: totalWeightKg });
+            const portalRes = await fetchPortalServices(clientId, { emirate: emirateName(emirateRaw), weight: totalWeightKg });
+            const portalServices = portalRes.services || [];
             // Only offer services that are available for this destination AND have a real configured price.
             const usable = portalServices.filter(s => s.available && !s.requiresScheduling && s.price != null && Number(s.price) > 0);
 
@@ -4192,10 +4255,13 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
             : (order.email || "—");
         const totalPieces = (order.line_items || []).reduce((s, i) => s + (i.quantity || 1), 0);
 
+        const { isCOD } = detectCOD(order);
+        const isCodStr = isCOD ? "true" : "false";
+
         rowsHtml += `
-        <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}">
+        <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}" data-is-cod="${isCodStr}">
             <td class="cb-col">
-                ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" onchange="cbChanged(this)">`}
+                ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-is-cod="${isCodStr}" onchange="cbChanged(this)">`}
             </td>
             <td><strong>${escHtml(order.name)}</strong></td>
             <td>${escHtml(customerName)}</td>
@@ -4502,9 +4568,18 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
         }
 
         function openSyncModal(count) {
+            var checked = getChecked();
+            var hasCod = checked.some(function(cb) { return cb.getAttribute("data-is-cod") === "true"; });
+
             var modal = document.getElementById("svcModal");
             var sub = document.getElementById("svcModalSub");
             if (sub) sub.textContent = count + " order" + (count !== 1 ? "s" : "") + " selected — choose a service for all of them.";
+            
+            var codSection = document.getElementById("codMethodSection");
+            if (codSection) {
+                codSection.style.display = hasCod ? "block" : "none";
+            }
+
             modal.classList.add("open");
             loadServices();
         }
@@ -4516,7 +4591,7 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
         function loadServices() {
             var list = document.getElementById("svcList");
             var confirmBtn = document.getElementById("svcConfirmBtn");
-            if (SERVICES_CACHE) { renderServices(SERVICES_CACHE.services, SERVICES_CACHE.default); return; }
+            if (SERVICES_CACHE) { renderServices(SERVICES_CACHE.services, SERVICES_CACHE.default, SERVICES_CACHE.ccodEnabled); return; }
             list.innerHTML = '<p style="color:#6B6F77;font-size:13px;text-align:center;padding:14px;">Loading services…</p>';
             confirmBtn.disabled = true;
             (async function() {
@@ -4529,16 +4604,33 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
                     if (!res.ok) throw new Error("Server " + res.status);
                     var data = await res.json();
                     SERVICES_CACHE = data;
-                    renderServices(data.services || [], data.default);
+                    renderServices(data.services || [], data.default, data.ccodEnabled);
                 } catch (err) {
                     list.innerHTML = '<p style="color:#E10600;font-size:13px;text-align:center;padding:14px;">Could not load services: ' + err.message + '</p>';
                 }
             })();
         }
 
-        function renderServices(services, defaultCode) {
+        function renderServices(services, defaultCode, ccodEnabled) {
             var list = document.getElementById("svcList");
             var confirmBtn = document.getElementById("svcConfirmBtn");
+
+            var cardOpt = document.querySelector('#codMethodList .svc-option[data-code="card"]');
+            var anyOpt = document.querySelector('#codMethodList .svc-option[data-code="any"]');
+            var codMsg = document.getElementById("codDisabledMsg");
+            if (cardOpt && anyOpt) {
+                if (ccodEnabled) {
+                    cardOpt.style.opacity = "1"; cardOpt.style.pointerEvents = "auto";
+                    anyOpt.style.opacity = "1"; anyOpt.style.pointerEvents = "auto";
+                    if (codMsg) codMsg.style.display = "none";
+                } else {
+                    cardOpt.style.opacity = "0.5"; cardOpt.style.pointerEvents = "none"; cardOpt.classList.remove("selected");
+                    anyOpt.style.opacity = "0.5"; anyOpt.style.pointerEvents = "none"; anyOpt.classList.remove("selected");
+                    var cashOpt = document.querySelector('#codMethodList .svc-option[data-code="cash"]');
+                    if (cashOpt) cashOpt.classList.add("selected");
+                    if (codMsg) codMsg.style.display = "block";
+                }
+            }
             if (!services.length) {
                 list.innerHTML = '<p style="color:#6B6F77;font-size:13px;text-align:center;padding:14px;">No services available.</p>';
                 return;
@@ -4561,15 +4653,26 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
             document.getElementById("svcConfirmBtn").disabled = false;
         }
 
+        function selectCodMethod(el) {
+            document.querySelectorAll("#codMethodList .svc-option").forEach(function(o){ o.classList.remove("selected"); });
+            el.classList.add("selected");
+        }
+
         function confirmSync() {
             var sel = document.querySelector("#svcList .svc-option.selected");
             if (!sel) return;
             var serviceType = sel.getAttribute("data-code");
+
+            var codSel = document.querySelector("#codMethodList .svc-option.selected");
+            // If none selected but it's visible, we just let it default to the shop's default, or we can use 'cash' as fallback.
+            // But we pre-select the shop default in the HTML below.
+            var codMethod = codSel ? codSel.getAttribute("data-code") : null;
+
             closeSyncModal();
-            doSync(pendingSyncOrderIds, serviceType);
+            doSync(pendingSyncOrderIds, serviceType, codMethod);
         }
 
-        function doSync(orderIds, serviceType) {
+        function doSync(orderIds, serviceType, codMethod) {
             if (!orderIds || orderIds.length === 0) return;
             var syncBtn = document.getElementById("syncBtn");
             syncBtn.disabled = true;
@@ -4588,7 +4691,7 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
             fetch("/shopify/manual-sync", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ shop: SHOP, orderIds: orderIds, serviceType: serviceType })
+                body: JSON.stringify({ shop: SHOP, orderIds: orderIds, serviceType: serviceType, codMethod: codMethod })
             })
             .then(function(resp) { return resp.json(); })
             .then(function(data) {
@@ -4716,6 +4819,25 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
         </div>
         <div class="modal-body">
           <div id="svcList"></div>
+          
+          <div id="codMethodSection" style="display:none; margin-top:16px; border-top:1px solid var(--line); padding-top:16px;">
+              <h3 style="font-family:var(--font-display);font-weight:600;font-size:15px;margin:0 0 12px;">COD Payment Method</h3>
+              <p id="codDisabledMsg" style="display:none;color:var(--accent);font-size:12px;margin-bottom:8px;">⚠️ Card options are disabled because CCOD is not enabled in your PathXpress account.</p>
+              <div id="codMethodList">
+                  <div class="svc-option ${shopData.default_cod_method === 'cash' || !shopData.default_cod_method ? 'selected' : ''}" data-code="cash" onclick="selectCodMethod(this)">
+                      <span class="radio-outer"><span class="radio-dot"></span></span>
+                      <span><span class="svc-name">💵 Cash on Delivery</span><span class="svc-meta">Customer pays cash</span></span>
+                  </div>
+                  <div class="svc-option ${shopData.default_cod_method === 'card' ? 'selected' : ''}" data-code="card" onclick="selectCodMethod(this)">
+                      <span class="radio-outer"><span class="radio-dot"></span></span>
+                      <span><span class="svc-name">💳 Card on Delivery</span><span class="svc-meta">Customer pays by card via Tap to Pay</span></span>
+                  </div>
+                  <div class="svc-option ${shopData.default_cod_method === 'any' ? 'selected' : ''}" data-code="any" onclick="selectCodMethod(this)">
+                      <span class="radio-outer"><span class="radio-dot"></span></span>
+                      <span><span class="svc-name">💵💳 Cash or Card</span><span class="svc-meta">Customer decides at the door</span></span>
+                  </div>
+              </div>
+          </div>
         </div>
         <div class="modal-foot">
           <button class="btn-outline" onclick="closeSyncModal()">Cancel</button>
@@ -5777,7 +5899,7 @@ app.get("/app/waybill/:waybill.pdf", requireSessionToken, async (req, res) => {
 
 // --- Endpoint de sincronización manual (batch) ---
 app.post("/shopify/manual-sync", express.json(), async (req, res) => {
-    const { shop, orderIds, serviceType } = req.body || {};
+    const { shop, orderIds, serviceType, codMethod } = req.body || {};
 
     if (!shop || !Array.isArray(orderIds) || orderIds.length === 0) {
         return res.status(400).json({ error: "Missing shop or orderIds array" });
@@ -5786,6 +5908,11 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
     // short alphanumeric code; otherwise ignore and let orderToShipment use the default.
     const serviceOverride = (typeof serviceType === "string" && /^[A-Z0-9_]{1,40}$/i.test(serviceType.trim()))
         ? serviceType.trim()
+        : null;
+    // Optional per-sync COD method override chosen in the sync modal.
+    const validCodMethods = ['cash', 'card', 'any'];
+    const codMethodOverride = (typeof codMethod === "string" && validCodMethods.includes(codMethod))
+        ? codMethod
         : null;
     if (!/^[a-z0-9-]+\.myshopify\.com$/i.test(shop)) {
         return res.status(400).json({ error: "Invalid shop parameter" });
@@ -5836,7 +5963,7 @@ app.post("/shopify/manual-sync", express.json(), async (req, res) => {
             const assignedLocation = await getOrderAssignedLocation(shop, shopData.access_token, order.id);
 
             // 4. Full sync flow
-            const shipment = orderToShipment(order, shop, shopData, assignedLocation, serviceOverride);
+            const shipment = orderToShipment(order, shop, shopData, assignedLocation, serviceOverride, codMethodOverride);
 
             const portalWaybill = await sendShipmentToPathxpress(shipment);
             if (portalWaybill) shipment.waybillNumber = portalWaybill;
@@ -5883,7 +6010,7 @@ app.get("/shopify/unsynced-orders", async (req, res) => {
 
     const clientId = shopData.pathxpress_client_id || 1;
     const MAX_UNSYNCED = 200;
-    const MAX_PAGES = 10;
+    const MAX_PAGES = 2; // 2 páginas x 250 = máx. 500 órdenes escaneadas por pasada
 
     const unsyncedOrders = [];
     let currentPageInfo = req.query.page_info || null;
@@ -5892,8 +6019,17 @@ app.get("/shopify/unsynced-orders", async (req, res) => {
 
     try {
         while (pagesScanned < MAX_PAGES && unsyncedOrders.length < MAX_UNSYNCED) {
-            let url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=250&status=any`;
-            if (currentPageInfo) url += `&page_info=${encodeURIComponent(currentPageInfo)}`;
+            // Shopify solo admite limit/fields junto con page_info; al paginar, los
+            // filtros (status/fulfillment_status) ya quedan "horneados" en el cursor.
+            let url;
+            if (currentPageInfo) {
+                url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=250&page_info=${encodeURIComponent(currentPageInfo)}`;
+            } else {
+                // Solo órdenes abiertas y sin cumplir (es decir, no recogidas todavía).
+                // Las ya entregadas/cumplidas las cumple PathXpress al marcarlas como recogidas,
+                // así que no necesitamos sincronizarlas de nuevo.
+                url = `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=250&status=open&fulfillment_status=unfulfilled`;
+            }
 
             const response = await fetch(url, {
                 headers: { "X-Shopify-Access-Token": shopData.access_token }
@@ -6739,7 +6875,7 @@ function detectCOD(order) {
     return { isCOD, codAmount };
 }
 
-function orderToShipment(order, shop, shopData, assignedLocation = null, serviceTypeOverride = null) {
+function orderToShipment(order, shop, shopData, assignedLocation = null, serviceTypeOverride = null, codMethodOverride = null) {
     const shipping = order.shipping_address || order.billing_address || {};
     const customer = order.customer || {};
 
@@ -6781,6 +6917,12 @@ function orderToShipment(order, shop, shopData, assignedLocation = null, service
 
     // Determinar Service Type - Override por orden (selector manual) → default de la tienda → DOM
     const serviceType = serviceTypeOverride || shopData?.default_service_type || "DOM";
+
+    // Determinar COD Payment Method - Override per-batch → default de la tienda → cash
+    // Only applies when the order is actually COD (codAmount > 0)
+    const codPaymentMethod = codAmount > 0
+        ? (codMethodOverride || shopData?.default_cod_method || "cash")
+        : null;
 
     return {
         // info de integración
@@ -6844,6 +6986,7 @@ function orderToShipment(order, shop, shopData, assignedLocation = null, service
         codRequired: codAmount > 0 ? 1 : 0,
         codAmount,
         codCurrency: order.currency || "AED",
+        codPaymentMethod,
 
         // Coordenadas GPS (Shopify las incluye cuando el cliente usó Google Maps Autocomplete)
         latitude: shipping.latitude ? String(shipping.latitude) : null,
@@ -6894,6 +7037,7 @@ async function sendShipmentToPathxpress(shipment) {
             codRequired: shipment.codAmount > 0 ? 1 : 0,
             codAmount: shipment.codAmount ? String(shipment.codAmount) : null,
             codCurrency: shipment.codCurrency || "AED",
+            codPaymentMethod: shipment.codPaymentMethod || null,
             latitude: shipment.latitude || null,
             longitude: shipment.longitude || null,
         },
@@ -6951,7 +7095,7 @@ async function fetchPortalServices(clientId, { emirate, weight } = {}) {
             return [];
         }
         const json = await response.json();
-        return Array.isArray(json.services) ? json.services : [];
+        return json;
     } catch (err) {
         console.error("⛔ Error obteniendo servicios del Portal:", err.message);
         return [];
