@@ -3699,7 +3699,11 @@ app.get("/api/services", requireSessionToken, async (req, res) => {
             ];
         }
 
-        res.json({ services, default: defaultService, ccodEnabled });
+        // Servicios internacionales (destinos fuera de UAE) — lista estática del portal
+        const intlServices = INTL_SERVICE_TYPES.map(s => ({ code: s.code, displayName: s.label, deliveryTime: null }));
+        const intlDefault = shopData.default_intl_service_type || DEFAULT_INTL_SERVICE;
+
+        res.json({ services, default: defaultService, intlServices, intlDefault, ccodEnabled });
     } catch (err) {
         console.error("⛔ Error fetching available services:", err);
         res.status(500).json({ error: "Internal server error" });
@@ -4433,13 +4437,19 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
 
         const { isCOD } = detectCOD(order);
         const isCodStr = isCOD ? "true" : "false";
+        const shipAddr = order.shipping_address || {};
+        const isIntl = isInternationalCountry(shipAddr.country_code || shipAddr.country);
+        const isIntlStr = isIntl ? "true" : "false";
+        const intlBadge = isIntl
+            ? ` <span class="badge intl" title="${escHtml(shipAddr.country || 'International')}">&#127760; ${escHtml(shipAddr.country_code || 'INTL')}</span>`
+            : "";
 
         rowsHtml += `
-        <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}" data-is-cod="${isCodStr}">
+        <tr data-order-id="${escHtml(order.id)}" data-order-name="${escHtml(order.name)}" data-is-cod="${isCodStr}" data-intl="${isIntlStr}">
             <td class="cb-col">
-                ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-is-cod="${isCodStr}" onchange="cbChanged(this)">`}
+                ${synced ? "" : `<input type="checkbox" class="order-cb" value="${escHtml(order.id)}" data-is-cod="${isCodStr}" data-intl="${isIntlStr}" onchange="cbChanged(this)">`}
             </td>
-            <td><strong>${escHtml(order.name)}</strong></td>
+            <td><strong>${escHtml(order.name)}</strong>${intlBadge}</td>
             <td>${escHtml(customerName)}</td>
             <td>${new Date(order.created_at).toLocaleDateString('en-AE')}</td>
             <td>${escHtml(order.total_price)} ${escHtml(order.currency)}</td>
@@ -4735,6 +4745,7 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
         // Basic-plan path (no dynamic rates at checkout → pick the service here).
         var SERVICES_CACHE = null;
         var pendingSyncOrderIds = [];
+        var pendingSyncScope = "domestic"; // 'domestic' | 'intl' | 'mixed'
 
         function syncSelected() {
             var checked = getChecked();
@@ -4746,11 +4757,22 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
         function openSyncModal(count) {
             var checked = getChecked();
             var hasCod = checked.some(function(cb) { return cb.getAttribute("data-is-cod") === "true"; });
+            var hasIntl = checked.some(function(cb) { return cb.getAttribute("data-intl") === "true"; });
+            var hasDomestic = checked.some(function(cb) { return cb.getAttribute("data-intl") !== "true"; });
+            pendingSyncScope = hasIntl && hasDomestic ? "mixed" : (hasIntl ? "intl" : "domestic");
 
             var modal = document.getElementById("svcModal");
             var sub = document.getElementById("svcModalSub");
-            if (sub) sub.textContent = count + " order" + (count !== 1 ? "s" : "") + " selected — choose a service for all of them.";
-            
+            if (sub) {
+                if (pendingSyncScope === "intl") {
+                    sub.textContent = count + " international order" + (count !== 1 ? "s" : "") + " selected — choose the export service.";
+                } else if (pendingSyncScope === "mixed") {
+                    sub.textContent = count + " orders selected (domestic + international) — each order gets the compatible service.";
+                } else {
+                    sub.textContent = count + " order" + (count !== 1 ? "s" : "") + " selected — choose a service for all of them.";
+                }
+            }
+
             var codSection = document.getElementById("codMethodSection");
             if (codSection) {
                 codSection.style.display = hasCod ? "block" : "none";
@@ -4767,7 +4789,7 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
         function loadServices() {
             var list = document.getElementById("svcList");
             var confirmBtn = document.getElementById("svcConfirmBtn");
-            if (SERVICES_CACHE) { renderServices(SERVICES_CACHE.services, SERVICES_CACHE.default, SERVICES_CACHE.ccodEnabled); return; }
+            if (SERVICES_CACHE) { renderServices(SERVICES_CACHE); return; }
             list.innerHTML = '<p style="color:#6B6F77;font-size:13px;text-align:center;padding:14px;">Loading services…</p>';
             confirmBtn.disabled = true;
             (async function() {
@@ -4780,14 +4802,27 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
                     if (!res.ok) throw new Error("Server " + res.status);
                     var data = await res.json();
                     SERVICES_CACHE = data;
-                    renderServices(data.services || [], data.default, data.ccodEnabled);
+                    renderServices(data);
                 } catch (err) {
                     list.innerHTML = '<p style="color:#E10600;font-size:13px;text-align:center;padding:14px;">Could not load services: ' + err.message + '</p>';
                 }
             })();
         }
 
-        function renderServices(services, defaultCode, ccodEnabled) {
+        function svcOptionHtml(s) {
+            return '<div class="svc-option" data-code="' + s.code + '" onclick="selectService(this)">'
+                + '<span class="radio-outer"><span class="radio-dot"></span></span>'
+                + '<span><span class="svc-name">' + s.displayName + '</span>'
+                + (s.deliveryTime ? '<span class="svc-meta">' + s.deliveryTime + '</span>' : '') + '</span>'
+                + '</div>';
+        }
+
+        function renderServices(data) {
+            var services = data.services || [];
+            var defaultCode = data.default;
+            var ccodEnabled = data.ccodEnabled;
+            var intlServices = data.intlServices || [];
+            var intlDefault = data.intlDefault;
             var list = document.getElementById("svcList");
             var confirmBtn = document.getElementById("svcConfirmBtn");
 
@@ -4811,14 +4846,30 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
                 list.innerHTML = '<p style="color:#6B6F77;font-size:13px;text-align:center;padding:14px;">No services available.</p>';
                 return;
             }
-            list.innerHTML = services.map(function(s) {
-                return '<div class="svc-option" data-code="' + s.code + '" onclick="selectService(this)">'
-                    + '<span class="radio-outer"><span class="radio-dot"></span></span>'
-                    + '<span><span class="svc-name">' + s.displayName + '</span>'
-                    + (s.deliveryTime ? '<span class="svc-meta">' + s.deliveryTime + '</span>' : '') + '</span>'
-                    + '</div>';
-            }).join("");
-            var preferred = list.querySelector('.svc-option[data-code="' + (defaultCode || '') + '"]') || list.querySelector('.svc-option');
+            // Render according to the destinations of the selected orders:
+            //  - intl only  → international services (the portal's export services)
+            //  - domestic   → the client's enabled domestic services (current behavior)
+            //  - mixed      → both groups; the server applies the compatible one per order
+            var html = "";
+            var preferredCode = defaultCode;
+            if (pendingSyncScope === "intl") {
+                html = intlServices.map(svcOptionHtml).join("");
+                preferredCode = intlDefault;
+            } else if (pendingSyncScope === "mixed") {
+                html = '<div class="svc-group">Domestic (UAE)</div>'
+                    + services.map(svcOptionHtml).join("")
+                    + '<div class="svc-group">International</div>'
+                    + intlServices.map(svcOptionHtml).join("")
+                    + '<p class="svc-note">Domestic orders use the domestic selection; international orders use the international one (or your default export service).</p>';
+            } else {
+                html = services.map(svcOptionHtml).join("");
+            }
+            if (!html) {
+                list.innerHTML = '<p style="color:#6B6F77;font-size:13px;text-align:center;padding:14px;">No services available.</p>';
+                return;
+            }
+            list.innerHTML = html;
+            var preferred = list.querySelector('.svc-option[data-code="' + (preferredCode || '') + '"]') || list.querySelector('.svc-option');
             if (preferred) selectService(preferred);
             confirmBtn.disabled = false;
         }
@@ -4905,9 +4956,11 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
 
         function renderUnsyncedRow(order) {
             var date = new Date(order.created_at).toLocaleDateString('en-AE');
-            return '<tr data-order-id="' + order.id + '">'
-                + '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" onchange="cbChanged(this)"></td>'
-                + '<td><strong>' + order.name + '</strong></td>'
+            var isIntl = order.isIntl === true;
+            var intlBadge = isIntl ? ' <span class="badge intl">&#127760; ' + (order.destCountry || 'INTL') + '</span>' : '';
+            return '<tr data-order-id="' + order.id + '" data-intl="' + (isIntl ? 'true' : 'false') + '">'
+                + '<td class="cb-col"><input type="checkbox" class="order-cb" value="' + order.id + '" data-intl="' + (isIntl ? 'true' : 'false') + '" onchange="cbChanged(this)"></td>'
+                + '<td><strong>' + order.name + '</strong>' + intlBadge + '</td>'
                 + '<td>' + (order.customerName || "—") + '</td>'
                 + '<td>' + date + '</td>'
                 + '<td>' + order.total_price + ' ' + order.currency + '</td>'
@@ -4985,6 +5038,10 @@ app.get("/app/orders", requireSessionToken, async (req, res) => {
       .svc-option.selected .radio-dot{transform:scale(1);}
       .svc-name{font-family:var(--font-display);font-weight:600;font-size:14px;display:block;}
       .svc-meta{font-size:12px;color:var(--muted);margin-top:1px;display:block;}
+      .svc-group{font-family:var(--font-display);font-weight:700;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 2px 8px;}
+      .svc-group:first-child{margin-top:2px;}
+      .svc-note{font-size:12px;color:var(--muted);margin:4px 2px 0;}
+      .badge.intl{background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);font-size:11px;padding:2px 7px;border-radius:20px;font-weight:600;white-space:nowrap;}
     </style>
 
     <div class="modal-overlay" id="svcModal" onclick="if(event.target===this)closeSyncModal()">
@@ -6242,7 +6299,9 @@ app.get("/shopify/unsynced-orders", async (req, res) => {
                         customerName,
                         total_price: order.total_price,
                         currency: order.currency,
-                        created_at: order.created_at
+                        created_at: order.created_at,
+                        isIntl: isInternationalCountry(shipping.country_code || shipping.country),
+                        destCountry: shipping.country_code || shipping.country || null
                     });
                     if (unsyncedOrders.length >= MAX_UNSYNCED) break;
                 }
@@ -7108,7 +7167,11 @@ function orderToShipment(order, shop, shopData, assignedLocation = null, service
         serviceType = intlOverride || shopData?.default_intl_service_type || DEFAULT_INTL_SERVICE;
         console.log(`🌍 International order ${order.name} → ${shipping.country || shipping.country_code}: using service ${serviceType}`);
     } else {
-        serviceType = serviceTypeOverride || shopData?.default_service_type || "DOM";
+        // Ignorar overrides internacionales en órdenes domésticas (batch mixto en sync manual)
+        const domesticOverride = serviceTypeOverride && !INTL_SERVICE_TYPES.some(s => s.code === serviceTypeOverride)
+            ? serviceTypeOverride
+            : null;
+        serviceType = domesticOverride || shopData?.default_service_type || "DOM";
     }
 
     // Determinar COD Payment Method - Override per-batch → default de la tienda → cash
