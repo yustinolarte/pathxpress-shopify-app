@@ -20,6 +20,25 @@ const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || "2025-04";
 // URL base del portal PathXpress (tracking, API, etc.)
 const PATHXPRESS_TRACKING_URL = process.env.PATHXPRESS_TRACKING_URL || "https://pathxpress.net/tracking";
 
+// Servicios internacionales del portal (deben coincidir con SERVICE en internationalRateEngine.ts)
+// Las órdenes con destino fuera de UAE no pueden usar servicios domésticos (DOM/SDD/etc.)
+const INTL_SERVICE_TYPES = [
+    { code: "PREMIUM_EXPORT", label: "International Premium Export (up to 30kg)" },
+    { code: "GCC", label: "GCC Express (GCC countries)" },
+    { code: "PRIME_EXPRESS", label: "PRIME Express (E-packets, up to 2kg)" },
+    { code: "PRIME_TRACKED", label: "PRIME Tracked (E-packets, up to 2kg)" },
+    { code: "PRIME_REGISTERED_POD", label: "PRIME Registered POD (E-packets, up to 2kg)" },
+];
+const DEFAULT_INTL_SERVICE = "PREMIUM_EXPORT";
+
+// Destino internacional = cualquier país que no sea UAE (acepta nombre completo o código ISO)
+function isInternationalCountry(country) {
+    if (!country) return false;
+    const c = String(country).trim().toUpperCase().replace(/\./g, "");
+    if (!c) return false;
+    return !["AE", "UAE", "UNITED ARAB EMIRATES", "EMIRATES"].includes(c);
+}
+
 // Pool de conexión a MySQL
 const db = mysql.createPool({
     host: process.env.DB_HOST,
@@ -53,6 +72,19 @@ db.getConnection()
             console.log("✅ Migración: columna default_cod_method verificada.");
         } catch (e) {
             console.warn("⚠️ Migración default_cod_method:", e.message);
+        }
+        // Migración: agregar columna default_intl_service_type (servicio para órdenes internacionales)
+        // SHOW COLUMNS + ALTER simple para compatibilidad MySQL 8 (no soporta ADD COLUMN IF NOT EXISTS)
+        try {
+            const [cols] = await conn.execute(`SHOW COLUMNS FROM shopify_shops LIKE 'default_intl_service_type'`);
+            if (cols.length === 0) {
+                await conn.execute(`ALTER TABLE shopify_shops ADD COLUMN default_intl_service_type VARCHAR(50) NOT NULL DEFAULT 'PREMIUM_EXPORT'`);
+                console.log("✅ Migración: columna default_intl_service_type creada.");
+            } else {
+                console.log("✅ Migración: columna default_intl_service_type verificada.");
+            }
+        } catch (e) {
+            console.warn("⚠️ Migración default_intl_service_type:", e.message);
         }
         conn.release();
     })
@@ -106,6 +138,19 @@ function verifySessionToken(token) {
         console.error("❌ Session token verification failed:", error.message);
         return null;
     }
+}
+
+// Middleware para proteger rutas de operador/debug que no se navegan desde la app
+// embebida (por eso no llevan Session Token de App Bridge). Se visitan pegando la
+// URL en el navegador, así que el secreto va como query param ?key=... en vez de
+// un header Authorization. Reutiliza SHOPIFY_API_SECRET (ya obligatorio) para no
+// requerir configurar una variable de entorno nueva.
+function requireAdminKey(req, res, next) {
+    const key = req.query.key;
+    if (!key || key !== process.env.SHOPIFY_API_SECRET) {
+        return res.status(401).send("Unauthorized: missing or invalid ?key=");
+    }
+    next();
 }
 
 // Middleware para proteger rutas con Session Token (Shopify App Bridge 2.0+)
@@ -1062,8 +1107,12 @@ app.post(
             const consigneeCity = shippingAddr.city || "Unknown";
             const consigneeCountry = shippingAddr.country || "UAE";
 
-            // Determine service type
+            // Determine service type (return leg destination is the merchant in UAE → domestic)
             const serviceType = shopData.default_service_type || "DOM";
+            // Exchange new-item leg goes to the customer — if they're abroad, use the intl service
+            const exchangeServiceType = isInternationalCountry(consigneeCountry)
+                ? (shopData.default_intl_service_type || DEFAULT_INTL_SERVICE)
+                : serviceType;
 
             // Determine if exchange
             const hasExchangeItems = returnObj.exchangeLineItems.edges.length > 0;
@@ -1181,13 +1230,25 @@ app.post(
 
             // ===== 5.5 INJECT TRACKING INTO SHOPIFY RETURN =====
             try {
-                // 1. First get the reverseDelivery ID for this return
+                // 1. Get the reverse fulfillment order (with its line items) and any
+                //    existing reverse delivery. Shopify only auto-creates a ReverseDelivery
+                //    when the merchant attaches a label at approval time — for exchanges
+                //    approved without a label there is none, so we must create it ourselves.
                 const deliveryTrackerQuery = `
                     query getReverseDelivery($id: ID!) {
                         return(id: $id) {
                             reverseFulfillmentOrders(first: 10) {
                                 edges {
                                     node {
+                                        id
+                                        lineItems(first: 50) {
+                                            edges {
+                                                node {
+                                                    id
+                                                    totalQuantity
+                                                }
+                                            }
+                                        }
                                         reverseDeliveries(first: 10) {
                                             edges {
                                                 node {
@@ -1202,20 +1263,33 @@ app.post(
                     }
                 `;
 
-                const deliveryRes = await shopifyGraphQL(shop, shopData.access_token, deliveryTrackerQuery, { id: returnGid });
-
-                // Navigate nested edges to find the first reverse delivery ID
+                // The RFO can lag the returns/approve webhook by a moment — retry briefly
                 let deliveryId = null;
-                const rfoEdges = deliveryRes?.return?.reverseFulfillmentOrders?.edges || [];
-                for (const rfoEdge of rfoEdges) {
-                    const deliveryEdges = rfoEdge?.node?.reverseDeliveries?.edges || [];
-                    if (deliveryEdges.length > 0) {
-                        deliveryId = deliveryEdges[0]?.node?.id;
-                        break;
+                let rfoNode = null;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    const deliveryRes = await shopifyGraphQL(shop, shopData.access_token, deliveryTrackerQuery, { id: returnGid });
+                    const rfoEdges = deliveryRes?.return?.reverseFulfillmentOrders?.edges || [];
+                    for (const rfoEdge of rfoEdges) {
+                        if (!rfoEdge?.node?.id) continue;
+                        if (!rfoNode) rfoNode = rfoEdge.node;
+                        const deliveryEdges = rfoEdge?.node?.reverseDeliveries?.edges || [];
+                        if (deliveryEdges.length > 0) {
+                            deliveryId = deliveryEdges[0]?.node?.id;
+                            rfoNode = rfoEdge.node;
+                            break;
+                        }
                     }
+                    if (deliveryId || rfoNode) break;
+                    console.log(`⏳ No reverseFulfillmentOrder yet for ${returnObj.name} (attempt ${attempt}/3). Retrying in 3s...`);
+                    await new Promise(r => setTimeout(r, 3000));
                 }
 
-                // 2. If we found the delivery ID, inject the tracking number
+                const trackingInput = {
+                    number: returnWaybill,
+                    url: `${PATHXPRESS_TRACKING_URL}?id=${returnWaybill}`
+                };
+
+                // 2a. Reverse delivery already exists (merchant attached a label) → update its tracking
                 if (deliveryId) {
                     console.log(`🔗 Found reverse delivery for Shopify return ${returnObj.name}, ID: ${deliveryId}. Injecting tracking: ${returnWaybill}`);
 
@@ -1235,10 +1309,7 @@ app.post(
 
                     const trackRes = await shopifyGraphQL(shop, shopData.access_token, updateTrackingMutation, {
                         reverseDeliveryId: deliveryId,
-                        trackingInput: {
-                            number: returnWaybill,
-                            url: `${PATHXPRESS_TRACKING_URL}?id=${returnWaybill}`
-                        }
+                        trackingInput
                     });
 
                     if (trackRes?.reverseDeliveryShippingUpdate?.userErrors?.length) {
@@ -1246,8 +1317,47 @@ app.post(
                     } else {
                         console.log(`✅ Successfully injected waybill ${returnWaybill} into Shopify return ${returnObj.name}`);
                     }
+
+                // 2b. No reverse delivery yet (typical for exchanges approved without a label)
+                //     → create one carrying our waybill so it shows on the return in Shopify
+                } else if (rfoNode) {
+                    const reverseDeliveryLineItems = (rfoNode.lineItems?.edges || [])
+                        .filter(e => e?.node?.id)
+                        .map(e => ({
+                            reverseFulfillmentOrderLineItemId: e.node.id,
+                            quantity: e.node.totalQuantity || 1
+                        }));
+
+                    console.log(`🔗 No reverse delivery on return ${returnObj.name}. Creating one on RFO ${rfoNode.id} with waybill ${returnWaybill} (${reverseDeliveryLineItems.length} line items)`);
+
+                    const createDeliveryMutation = `
+                        mutation reverseDeliveryCreateWithShipping($reverseFulfillmentOrderId: ID!, $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!, $trackingInput: ReverseDeliveryTrackingInput!, $notifyCustomer: Boolean) {
+                            reverseDeliveryCreateWithShipping(reverseFulfillmentOrderId: $reverseFulfillmentOrderId, reverseDeliveryLineItems: $reverseDeliveryLineItems, trackingInput: $trackingInput, notifyCustomer: $notifyCustomer) {
+                                reverseDelivery {
+                                    id
+                                }
+                                userErrors {
+                                    field
+                                    message
+                                }
+                            }
+                        }
+                    `;
+
+                    const createRes = await shopifyGraphQL(shop, shopData.access_token, createDeliveryMutation, {
+                        reverseFulfillmentOrderId: rfoNode.id,
+                        reverseDeliveryLineItems,
+                        trackingInput,
+                        notifyCustomer: true
+                    });
+
+                    if (createRes?.reverseDeliveryCreateWithShipping?.userErrors?.length) {
+                        console.error('⚠️ Shopify reverseDeliveryCreateWithShipping errors:', createRes.reverseDeliveryCreateWithShipping.userErrors);
+                    } else {
+                        console.log(`✅ Reverse delivery created with waybill ${returnWaybill} for Shopify return ${returnObj.name}`);
+                    }
                 } else {
-                    console.warn(`⚠️ No reverseDelivery found for return ${returnObj.name} (${returnGid}). Raw response: ${JSON.stringify(deliveryRes?.return?.reverseFulfillmentOrders)}`);
+                    console.warn(`⚠️ No reverseFulfillmentOrder found for return ${returnObj.name} (${returnGid}). Waybill ${returnWaybill} NOT injected into Shopify.`);
                 }
             } catch (trackerErr) {
                 console.error(`⛔ Error injecting tracking into Shopify for return ${returnObj.name}:`, trackerErr.message);
@@ -1335,7 +1445,7 @@ app.post(
                         // Package
                         returnObj.exchangeLineItems.edges.length || 1,
                         exchangeWeightKg,
-                        serviceType,
+                        exchangeServiceType,
                         `SHOPIFY EXCHANGE NEW - ${returnObj.name} - Original: ${shopifyOrderName}`,
                         exchangeItems.join(", "),
 
@@ -1476,6 +1586,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
     let currentSyncTag = "";
     let currentSyncMode = "auto"; // 'auto' | 'tag' | 'manual'
     let currentServiceType = "DOM"; // Default service type
+    let currentIntlServiceType = DEFAULT_INTL_SERVICE; // Default international service type
     let freeShippingDOM = ""; // Umbral para envío gratis Standard
     let freeShippingExpress = ""; // Umbral para envío gratis Express
     let shipmentsRows = "<tr><td colspan='5'>No recent shipments.</td></tr>";
@@ -1490,6 +1601,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
             currentAutoSync = shopData.auto_sync !== 0; // MySQL boolean is 0/1
             currentAutoReturns = shopData.auto_returns !== 0; // Default true if column is NULL
             currentServiceType = shopData.default_service_type || "DOM";
+            currentIntlServiceType = shopData.default_intl_service_type || DEFAULT_INTL_SERVICE;
             currentSyncTag = shopData.sync_tag || "";
             currentSyncMode = shopData.sync_mode || (currentAutoSync ? 'auto' : (currentSyncTag ? 'tag' : 'manual'));
             freeShippingDOM = shopData.free_shipping_threshold_dom || "";
@@ -1584,8 +1696,41 @@ app.get("/app", requireSessionToken, async (req, res) => {
                 carrierServiceWarning = `
                     <div style="background: rgba(255, 193, 7, 0.15); border: 1px solid #FFC107; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
                         <h3 style="color: #FFC107; margin: 0 0 10px 0;">⚠️ Carrier Service Inactive</h3>
-                        <p style="color: #ccc; margin: 0;">PathXpress shipping service is installed but inactive. <a href="/fix/carrier/${shop}" style="color: #2D6CF6;">Click here to reactivate</a>.</p>
+                        <p style="color: #ccc; margin: 0;">PathXpress shipping service is installed but inactive. <a href="#" onclick="fixCarrierService(event)" id="fixCarrierLink" style="color: #2D6CF6;">Click here to reactivate</a>.</p>
                     </div>
+                    <script>
+                    async function fixCarrierService(evt) {
+                        evt.preventDefault();
+                        const link = document.getElementById('fixCarrierLink');
+                        const originalText = link.textContent;
+                        link.textContent = 'Reactivating...';
+                        try {
+                            let token = null;
+                            if (typeof getSessionToken === 'function') {
+                                token = await getSessionToken();
+                            } else if (window.shopify && window.shopify.id) {
+                                token = await window.shopify.id.getSessionToken();
+                            }
+                            const headers = {};
+                            if (token) headers['Authorization'] = 'Bearer ' + token;
+
+                            const res = await fetch('/fix/carrier/${shop}', { headers });
+                            const data = await res.json();
+
+                            if (data.success) {
+                                link.textContent = 'Reactivated! Refreshing...';
+                                setTimeout(() => window.location.reload(), 1200);
+                            } else {
+                                alert('Error: ' + (data.error || 'Unknown error'));
+                                link.textContent = originalText;
+                            }
+                        } catch (e) {
+                            console.error(e);
+                            alert('Connection error while reactivating carrier service.');
+                            link.textContent = originalText;
+                        }
+                    }
+                    </script>
                 `;
             }
         } catch (carrierErr) {
@@ -2520,7 +2665,18 @@ app.get("/app", requireSessionToken, async (req, res) => {
                             <option value="NEXTDAY" ${currentServiceType === 'NEXTDAY' ? 'selected' : ''}>NEXTDAY - Next Day Delivery</option>
                         </select>
                     </div>
-                    
+
+                    <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="globe" class="icon icon-sm"></i>International Shipping Service</h3>
+                    <p style="font-size:13px; margin-bottom:12px;">Service applied automatically to orders shipping outside the UAE (domestic services don't apply to international destinations).</p>
+
+                    <div class="settings-section">
+                        <select name="default_intl_service_type" id="default_intl_service_type" class="field">
+                            ${INTL_SERVICE_TYPES.map(s =>
+                                `<option value="${s.code}" ${currentIntlServiceType === s.code ? 'selected' : ''}>${s.label}</option>`
+                            ).join("\n                            ")}
+                        </select>
+                    </div>
+
                     <h3 style="margin-top:24px; font-size:16px;"><i data-lucide="gift" class="icon icon-sm"></i>Free Shipping</h3>
                     <p style="font-size:13px; margin-bottom:12px;">Set minimum order amounts for free shipping. Leave empty to disable.</p>
                     
@@ -2877,7 +3033,7 @@ app.get("/app", requireSessionToken, async (req, res) => {
 // ======================
 // 4.0.1) API: Validate Client ID
 // ======================
-app.get("/api/validate-client/:id", async (req, res) => {
+app.get("/api/validate-client/:id", requireSessionToken, async (req, res) => {
     const clientId = req.params.id;
 
     try {
@@ -2921,7 +3077,7 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
         return res.status(401).json({ success: false, message: "Unauthorized: Missing shop or valid session." });
     }
 
-    const { clientId, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_dom, free_shipping_express, auto_returns, default_cod_method } = req.body;
+    const { clientId, default_service_type, default_intl_service_type, auto_sync, sync_tag, sync_mode, free_shipping_dom, free_shipping_express, auto_returns, default_cod_method } = req.body;
 
     if (!clientId) {
         return res.status(400).json({ success: false, message: "Error: Missing Client ID." });
@@ -2934,6 +3090,10 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     const isAutoSync = resolvedSyncMode === 'auto' ? 1 : 0;
     const isAutoReturns = auto_returns === "1" || auto_returns === true ? 1 : 0;
     const serviceType = default_service_type || "DOM";
+    // Servicio internacional: validar contra la lista conocida (fallback PREMIUM_EXPORT)
+    const intlServiceType = INTL_SERVICE_TYPES.some(s => s.code === default_intl_service_type)
+        ? default_intl_service_type
+        : DEFAULT_INTL_SERVICE;
     const freeShippingDOMValue = free_shipping_dom && parseFloat(free_shipping_dom) > 0
         ? parseFloat(free_shipping_dom)
         : null;
@@ -2947,11 +3107,12 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
     try {
         // Use INSERT ... ON DUPLICATE KEY UPDATE to support both new and existing shops
         await db.execute(
-            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, auto_sync, sync_tag, sync_mode, free_shipping_threshold_dom, free_shipping_threshold_express, default_cod_method)
-             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `INSERT INTO shopify_shops(shop_domain, pathxpress_client_id, default_service_type, default_intl_service_type, auto_sync, sync_tag, sync_mode, free_shipping_threshold_dom, free_shipping_threshold_express, default_cod_method)
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 pathxpress_client_id = VALUES(pathxpress_client_id),
                 default_service_type = VALUES(default_service_type),
+                default_intl_service_type = VALUES(default_intl_service_type),
                 auto_sync = VALUES(auto_sync),
                 sync_tag = VALUES(sync_tag),
                 sync_mode = VALUES(sync_mode),
@@ -2959,9 +3120,9 @@ app.post("/app/save-settings", requireSessionToken, async (req, res) => {
                 free_shipping_threshold_express = VALUES(free_shipping_threshold_express),
                 default_cod_method = VALUES(default_cod_method),
                 updated_at = CURRENT_TIMESTAMP`,
-            [shop, clientId, serviceType, isAutoSync, sync_tag || null, resolvedSyncMode, freeShippingDOMValue, freeShippingExpressValue, resolvedCodMethod]
+            [shop, clientId, serviceType, intlServiceType, isAutoSync, sync_tag || null, resolvedSyncMode, freeShippingDOMValue, freeShippingExpressValue, resolvedCodMethod]
         );
-        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, SyncMode = ${resolvedSyncMode}, AutoReturns = ${isAutoReturns}, CodMethod = ${resolvedCodMethod}`);
+        console.log(`⚙️ Settings saved for ${shop}: ClientID = ${clientId}, Service = ${serviceType}, IntlService = ${intlServiceType}, SyncMode = ${resolvedSyncMode}, AutoReturns = ${isAutoReturns}, CodMethod = ${resolvedCodMethod}`);
 
         // Return JSON success
         res.json({ success: true, message: "Settings saved successfully" });
@@ -2991,6 +3152,7 @@ app.get("/app/settings", requireSessionToken, async (req, res) => {
     const freeShippingExpress = shopData.free_shipping_threshold_express || "";
     const currentAutoReturns = shopData.auto_returns !== 0;
     const currentCodMethod = shopData.default_cod_method || "cash";
+    const currentIntlServiceType = shopData.default_intl_service_type || DEFAULT_INTL_SERVICE;
 
     const escHtml = s => String(s == null ? "" : s)
         .replace(/&/g, "&amp;").replace(/</g, "&lt;")
@@ -3260,6 +3422,20 @@ app.get("/app/settings", requireSessionToken, async (req, res) => {
                 ${serviceOptionsHtml}
             </select>
             <p class="field-help">Default service applied to all orders from this store. Services shown are the ones enabled for your PathXpress account.</p>
+        </div>
+
+        <!-- INTERNATIONAL SERVICE -->
+        <div class="card">
+            <div class="section-heading">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                International Shipping Service
+            </div>
+            <select name="default_intl_service_type" id="default_intl_service_type" class="field">
+                ${INTL_SERVICE_TYPES.map(s =>
+                    `<option value="${s.code}" ${currentIntlServiceType === s.code ? 'selected' : ''}>${escHtml(s.label)}</option>`
+                ).join("\n                ")}
+            </select>
+            <p class="field-help">Applied automatically to orders shipping outside the UAE — domestic services (DOM, Same Day, Bullet) don't apply to international destinations. PRIME services only support parcels up to 2kg.</p>
         </div>
 
         <!-- FREE SHIPPING -->
@@ -3969,7 +4145,7 @@ function getDefaultRates(rate) {
 // ======================
 // 5.0) REINSTALACIÓN FORZADA (para tokens inválidos)
 // ======================
-app.get("/reinstall/:shop", async (req, res) => {
+app.get("/reinstall/:shop", requireAdminKey, async (req, res) => {
     const shop = req.params.shop;
 
     if (!shop || !shop.includes('.myshopify.com')) {
@@ -6243,7 +6419,7 @@ async function registerCarrierService(shop, accessToken) {
 // ======================
 // 8.2) DIAGNÓSTICO Y REPARACIÓN DE CARRIER SERVICE
 // ======================
-app.get("/debug/carrier/:shop", async (req, res) => {
+app.get("/debug/carrier/:shop", requireAdminKey, async (req, res) => {
     const shop = req.params.shop;
 
     try {
@@ -6386,8 +6562,12 @@ async function setupFixedRates(shop, accessToken) {
 }
 
 // Endpoint para FORZAR re-registro del Carrier Service (con diagnóstico completo)
-app.get("/fix/carrier/:shop", async (req, res) => {
+// Requiere Session Token válido para ESE mismo shop (no basta con conocer el dominio).
+app.get("/fix/carrier/:shop", requireSessionToken, async (req, res) => {
     const shop = req.params.shop;
+    if (!req.shopifySession || req.shopifySession.shop !== shop) {
+        return res.status(403).json({ success: false, error: "Session token does not match this shop" });
+    }
     const callbackUrl = `${process.env.APP_URL}/api/shipping-rates`;
 
     try {
@@ -6915,8 +7095,21 @@ function orderToShipment(order, shop, shopData, assignedLocation = null, service
         console.warn(`⚠️ Shop ${shop} does NOT have pathxpress_client_id configured. Using default: 1`);
     }
 
-    // Determinar Service Type - Override por orden (selector manual) → default de la tienda → DOM
-    const serviceType = serviceTypeOverride || shopData?.default_service_type || "DOM";
+    // Determinar Service Type
+    // Destino internacional (fuera de UAE): los servicios domésticos (DOM/SDD/BULLET) no aplican,
+    // así que usamos el servicio internacional default de la tienda (o el override si es internacional).
+    // Destino doméstico: override por orden (selector manual) → default de la tienda → DOM
+    const isIntlDestination = isInternationalCountry(shipping.country_code || shipping.country);
+    let serviceType;
+    if (isIntlDestination) {
+        const intlOverride = serviceTypeOverride && INTL_SERVICE_TYPES.some(s => s.code === serviceTypeOverride)
+            ? serviceTypeOverride
+            : null;
+        serviceType = intlOverride || shopData?.default_intl_service_type || DEFAULT_INTL_SERVICE;
+        console.log(`🌍 International order ${order.name} → ${shipping.country || shipping.country_code}: using service ${serviceType}`);
+    } else {
+        serviceType = serviceTypeOverride || shopData?.default_service_type || "DOM";
+    }
 
     // Determinar COD Payment Method - Override per-batch → default de la tienda → cash
     // Only applies when the order is actually COD (codAmount > 0)
