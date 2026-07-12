@@ -86,6 +86,22 @@ db.getConnection()
         } catch (e) {
             console.warn("⚠️ Migración default_intl_service_type:", e.message);
         }
+        // Self-heal: envíos de exchange (EXC-NEW) marcados ALREADY_FULFILLED por el bug del
+        // hold de Shopify (el FO del exchange está on_hold hasta recibir la devolución y el
+        // código viejo los daba por cumplidos). Se resetean para que el ciclo de sync los
+        // reevalúe: si el FO sigue cerrado se re-marca solo; si está abierto/en hold se
+        // inyecta el tracking pendiente.
+        try {
+            const [healed] = await conn.execute(
+                `UPDATE shopify_shipments SET shopify_fulfillment_id = NULL
+                 WHERE shop_order_name LIKE 'EXC-NEW-%' AND shopify_fulfillment_id = 'ALREADY_FULFILLED'`
+            );
+            if (healed.affectedRows > 0) {
+                console.log(`✅ Self-heal: ${healed.affectedRows} exchange shipment(s) re-encolados para inyección de tracking.`);
+            }
+        } catch (e) {
+            console.warn("⚠️ Self-heal EXC-NEW:", e.message);
+        }
         conn.release();
     })
     .catch(err => {
@@ -6827,6 +6843,11 @@ async function syncShipmentsToShopify() {
             )
             WHERE s.shopify_fulfillment_id IS NULL
               AND LOWER(o.status) IN ('picked_up', 'in_transit', 'out_for_delivery', 'delivered')
+              -- Los legs de retorno (RTN-/EXC-RTN-) no se cumplen como fulfillments: su
+              -- shop_order_id es un Return ID (404 en /orders/{id}/fulfillment_orders) y su
+              -- tracking se inyecta vía reverseDelivery al aprobar el return.
+              AND s.shop_order_name NOT LIKE 'RTN-%'
+              AND s.shop_order_name NOT LIKE 'EXC-RTN-%'
             LIMIT 10
         `);
 
@@ -6897,13 +6918,44 @@ async function fulfillShopifyOrder(row) {
         }
 
         // Filtramos las que estén 'open'
-        const openFO = fulfillmentOrders.find(fo => fo.status === 'open' || fo.status === 'in_progress');
+        let openFO = fulfillmentOrders.find(fo => fo.status === 'open' || fo.status === 'in_progress');
 
         if (!openFO) {
-            console.log(`   ℹ️ Order ${shop_order_name} (ID: ${shop_order_id}) has no open fulfillment_orders. Marking as locally synced.`);
-            // Actualizamos localmente para no reintentar infinito
-            await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = 'ALREADY_FULFILLED' WHERE id = ?", [shipment_id]);
-            return;
+            // Exchanges: Shopify crea el FO de los items nuevos EN HOLD ("awaiting return items")
+            // hasta que el merchant recibe la devolución. No hay que marcar ALREADY_FULFILLED
+            // (eso mataba la inyección del tracking para siempre) — hay que liberar el hold
+            // o reintentar en el próximo ciclo.
+            const heldFO = fulfillmentOrders.find(fo => fo.status === 'on_hold');
+            const scheduledFO = fulfillmentOrders.find(fo => fo.status === 'scheduled');
+
+            if (heldFO) {
+                // El paquete ya fue recogido físicamente (por eso estamos aquí) → liberar el hold
+                console.log(`   ⏸️ FO ${heldFO.id} is ON HOLD (exchange awaiting return?). Shipment already picked up → releasing hold...`);
+                const releaseRes = await fetch(
+                    `https://${shop_domain}/admin/api/2024-07/fulfillment_orders/${heldFO.id}/release_hold.json`,
+                    {
+                        method: "POST",
+                        headers: { "X-Shopify-Access-Token": accessToken, "Content-Type": "application/json" },
+                        body: JSON.stringify({})
+                    }
+                );
+                if (releaseRes.ok) {
+                    console.log(`   ✅ Hold released for FO ${heldFO.id}. Fulfilling with tracking now.`);
+                    openFO = heldFO;
+                } else {
+                    const errBody = await releaseRes.text();
+                    console.warn(`   ⚠️ Could not release hold for FO ${heldFO.id} (${releaseRes.status}): ${errBody}. Will retry next cycle (hold clears when the return is received).`);
+                    return; // sin marcar ALREADY_FULFILLED → se reintenta cada ciclo
+                }
+            } else if (scheduledFO) {
+                console.log(`   ⏳ FO ${scheduledFO.id} is SCHEDULED. Will retry next cycle.`);
+                return; // sin marcar → reintentar
+            } else {
+                console.log(`   ℹ️ Order ${shop_order_name} (ID: ${shop_order_id}) has no open fulfillment_orders. Marking as locally synced.`);
+                // Actualizamos localmente para no reintentar infinito
+                await db.execute("UPDATE shopify_shipments SET shopify_fulfillment_id = 'ALREADY_FULFILLED' WHERE id = ?", [shipment_id]);
+                return;
+            }
         }
 
         // Paso B: Crear fulfillment sobre esa fulfillment_order
